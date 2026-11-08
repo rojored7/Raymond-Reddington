@@ -1,0 +1,45 @@
+{
+  "header": {
+    "op": "",
+    "route": "edit | hotfix | implement | full | new-project",
+    "branch": "",
+    "date": "",
+    "overall": "READY | NOT READY - <bloqueantes> | INCOMPLETE - <lo que no corrio>"
+  },
+  "objective": {
+    "asked": "",
+    "done_condition": "",
+    "fix": {"symptom": "N/A - no es un fix", "broken_invariant": "", "correction_layer": ""}
+  },
+  "scope": {
+    "files_and_commits": [],
+    "contracts_touched": "N/A - <razon>"
+  },
+  "tests": {
+    "changed": [{"test": "", "red_before": "", "green_after": ""}],
+    "scoped_count": 0,
+    "not_run": []
+  },
+  "security": {
+    "owasp_table": "N/A - <razon>",
+    "secret_scan": "NOT RUN - <que falto> | PASS | FINDINGS",
+    "dependency_scan": "N/A - no cambio ningun archivo de dependencias",
+    "security_review": "N/A - sin disparador de seguridad"
+  },
+  "review": {
+    "blocking": [],
+    "suggestions": []
+  },
+  "documentation": "N/A - <razon>",
+  "deployment_notes": "N/A - <razon>",
+  "not_done_and_risks": [],
+  "verification": {
+    "dembe_verdict": "READY | NOT READY | INCOMPLETE",
+    "strikes": []
+  },
+  "cleanup": {
+    "released": [],
+    "kept": [],
+    "pending_user": []
+  }
+}

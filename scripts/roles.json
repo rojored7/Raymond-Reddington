@@ -1,0 +1,120 @@
+{
+  "common_disallowed": [
+    "PowerShell",
+    "Bash(git push:*)",
+    "Bash(*--no-verify*)",
+    "Bash(gh pr merge:*)",
+    "Bash(gh release:*)",
+    "Bash(docker push:*)",
+    "Bash(docker login:*)",
+    "Bash(kubectl:*)",
+    "Bash(helm:*)",
+    "Bash(terraform apply:*)",
+    "Bash(terraform destroy:*)",
+    "Bash(*upload_images*)",
+    "Bash(*publish-complete-release*)",
+    "Bash(mkdocs build:*)"
+  ],
+  "remote_disallowed": [
+    "Bash(ssh:*)",
+    "Bash(scp:*)",
+    "Bash(sftp:*)",
+    "Bash(rsync:*)"
+  ],
+  "brief_scan_fields": [
+    "objective",
+    "context",
+    "criteria",
+    "notes",
+    "message"
+  ],
+  "brief_forbidden": [
+    {
+      "pattern": "\\bprod(uction|uccion|ucción)?\\b",
+      "why": "toca produccion (nivel 3: lo confirma el usuario en el momento)"
+    },
+    {
+      "pattern": "\\bgit\\s+push\\b",
+      "why": "push al remoto (nivel 3)"
+    },
+    {
+      "pattern": "\\bupload[_ -]?images\\b|\\bpublicar\\s+imagen",
+      "why": "subida de imagenes (nivel 3)"
+    },
+    {
+      "pattern": "\\bdeploy\\w*\\b|\\bdespleg\\w*|\\bdesplieg\\w*",
+      "why": "despliegue sin destino autorizado",
+      "unless_destinations": true
+    }
+  ],
+  "roles": {
+    "glen": {
+      "model": "sonnet",
+      "permission_mode": "auto",
+      "budget_usd": 3,
+      "max_budget_usd": 10,
+      "timeout_min": 30,
+      "writes_code": false,
+      "disallowed": [
+        "Edit",
+        "Write",
+        "NotebookEdit"
+      ]
+    },
+    "baz": {
+      "model": "opus",
+      "permission_mode": "auto",
+      "budget_usd": 15,
+      "max_budget_usd": 50,
+      "timeout_min": 180,
+      "writes_code": true,
+      "disallowed": []
+    },
+    "dembe": {
+      "model": "opus",
+      "permission_mode": "auto",
+      "budget_usd": 6,
+      "max_budget_usd": 20,
+      "timeout_min": 60,
+      "writes_code": false,
+      "disallowed": [
+        "Edit",
+        "Write",
+        "NotebookEdit"
+      ]
+    },
+    "kaplan": {
+      "model": "sonnet",
+      "permission_mode": "auto",
+      "budget_usd": 2,
+      "max_budget_usd": 6,
+      "timeout_min": 30,
+      "writes_code": false,
+      "disallowed": [
+        "Bash(git worktree remove:*)",
+        "Bash(git worktree prune:*)",
+        "Bash(git worktree move:*)",
+        "Bash(git reset --hard:*)",
+        "Bash(git clean:*)",
+        "Bash(git branch -D:*)"
+      ]
+    },
+    "zeng": {
+      "model": "haiku",
+      "permission_mode": "auto",
+      "budget_usd": 0.5,
+      "max_budget_usd": 2,
+      "timeout_min": 15,
+      "writes_code": false,
+      "reads_only_costs": true,
+      "disallowed": [
+        "Edit",
+        "Write",
+        "NotebookEdit"
+      ],
+      "allowed": [
+        "Bash(bash ~/.claude/red/scripts/red-cost.sh:*)"
+      ]
+    }
+  }
+}

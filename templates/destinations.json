@@ -1,0 +1,22 @@
+{
+  "destinations": [
+    {
+      "name": "qa-ejemplo",
+      "host": "10.0.0.21",
+      "level": 2,
+      "url": "http://10.0.0.21:8080",
+      "protect": ["servicio-ajeno_*"],
+      "example": true,
+      "notes": "EJEMPLO. Registra tus servidores reales con: red-op.sh dest add --name <n> --host <h> --level 2 --protect <patrones>. Nunca guardes credenciales aqui."
+    },
+    {
+      "name": "prod-ejemplo",
+      "host": "10.0.0.98",
+      "level": 3,
+      "url": "https://10.0.0.98",
+      "protect": ["*"],
+      "example": true,
+      "notes": "EJEMPLO. Nivel 3: cada accion la confirma el usuario en el momento; ningun teniente entra."
+    }
+  ]
+}

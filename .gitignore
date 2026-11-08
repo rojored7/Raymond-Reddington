@@ -1,0 +1,7 @@
+.red/
+__pycache__/
+*.pyc
+*.log
+.playwright-mcp/
+*.stackdump
+.ruff_cache/

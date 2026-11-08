@@ -1,0 +1,218 @@
+#!/usr/bin/env bash
+# Tests del lanzador unico de tenientes. Nunca lanza claude real: usa --dry-run o un claude falso.
+source "$(dirname "$0")/lib.sh"
+L="$ROOT/scripts/launch-operative.sh"
+echo "test_launch_operative"
+
+T="$(make_tmp)"; P="$T/proj"; mkdir -p "$P"; cd "$P" || exit 1
+export RED_DATA_DIR="$T/data"
+OPD="$P/.red/ops/op1"; mkdir -p "$OPD/sessions"; echo '{"op":"op1","status":"executing"}' > "$OPD/state.json"
+echo '{"session_id":"abc-123","role":"baz"}' > "$OPD/sessions/baz-0.json"
+BRIEF="$T/brief.json"
+cat > "$BRIEF" <<'EOF'
+{"task":"t1","objective":"Crear funcion suma con su test","context":"repo local de prueba",
+ "criteria":["existe test que falla primero","suma(2,3)==5"],"out_of_scope":["no hacer git push","no tocar prod"]}
+EOF
+
+dry() { bash "$L" "$@" --dry-run 2>&1; }
+
+out="$(dry dembe op1 "$BRIEF")"
+assert_contains "dry-run usa --agent dembe" "$out" '"--agent", "dembe"'
+assert_contains "dry-run usa modo headless -p" "$out" '"-p"'
+assert_contains "dry-run usa permission-mode auto" "$out" '"--permission-mode", "auto"'
+assert_contains "dry-run pide salida json" "$out" '"--output-format", "json"'
+assert_contains "dry-run aplica presupuesto" "$out" '"--max-budget-usd"'
+assert_contains "dembe tiene Edit prohibido" "$out" 'Edit'
+assert_contains "bloqueo comun: git push" "$out" 'Bash(git push:*)'
+assert_contains "bloqueo comun: --no-verify" "$out" 'no-verify'
+assert_contains "bloqueo comun: PowerShell" "$out" '"PowerShell"'
+assert_not_contains "nunca bypassPermissions" "$out" 'bypassPermissions'
+assert_contains "zeng usa el modelo mas economico" "$(dry zeng op1 "$BRIEF")" '"--model", "haiku"'
+assert_contains "zeng tiene permiso explicito para red-cost" "$(dry zeng op1 "$BRIEF")" '"--allowedTools", "Bash(bash ~/.claude/red/scripts/red-cost.sh:*)"'
+assert_not_contains "otros roles no reciben allowedTools de zeng" "$(dry glen op1 "$BRIEF")" 'red-cost.sh'
+assert_contains "kaplan no puede borrar worktrees" "$(dry kaplan op1 "$BRIEF")" 'Bash(git worktree remove:*)'
+assert_contains "presupuesto explicito" "$(dry baz op1 "$BRIEF" --budget 1.5)" '"1.5"'
+assert_contains "resume arma --resume" "$(dry baz op1 "$BRIEF" --resume abc-123 --message 'falta evidencia')" '"--resume", "abc-123"'
+assert_contains "prohibiciones en out_of_scope no rechazan el brief" "$(dry glen op1 "$BRIEF"; echo "rc=$?")" "rc=0"
+
+bash "$L" nadie op1 "$BRIEF" --dry-run >/dev/null 2>&1; assert_eq "rol desconocido falla" "$?" "2"
+bash "$L" baz "../../x" "$BRIEF" --dry-run >/dev/null 2>&1; assert_eq "op con traversal se rechaza" "$?" "2"
+bash "$L" baz op-inexistente "$BRIEF" --dry-run >/dev/null 2>&1; assert_eq "op sin state.json se rechaza" "$?" "2"
+bash "$L" baz op1 "$BRIEF" --budget inf --dry-run >/dev/null 2>&1; assert_eq "presupuesto inf se rechaza" "$?" "2"
+bash "$L" baz op1 "$BRIEF" --budget 999 --dry-run >/dev/null 2>&1; assert_eq "presupuesto sobre el tope se rechaza" "$?" "2"
+bash "$L" baz op1 "$BRIEF" --budget 0 --dry-run >/dev/null 2>&1; assert_eq "presupuesto cero se rechaza" "$?" "2"
+bash "$L" baz op1 "$BRIEF" --resume 'x;rm' --message m --dry-run >/dev/null 2>&1; assert_eq "resume con caracteres invalidos se rechaza" "$?" "2"
+bash "$L" baz op1 "$BRIEF" --resume otra-sesion --message m --dry-run >/dev/null 2>&1; assert_eq "resume de sesion ajena a la operacion se rechaza" "$?" "2"
+cat > "$T/prod.json" <<'EOF'
+{"task":"t2","objective":"Reiniciar el servicio en prod","criteria":["ok"]}
+EOF
+bash "$L" baz op1 "$T/prod.json" --dry-run >/dev/null 2>&1; assert_eq "brief con prod se rechaza" "$?" "3"
+cat > "$T/deploy.json" <<'EOF'
+{"task":"t3","objective":"hacer deploy y git push del branch","criteria":["ok"]}
+EOF
+bash "$L" baz op1 "$T/deploy.json" --dry-run >/dev/null 2>&1; assert_eq "brief con push/deploy se rechaza" "$?" "3"
+cat > "$T/product.json" <<'EOF'
+{"task":"t4","objective":"Revisar el modulo productos y la tabla production_line_x","criteria":["ok"],
+ "inputs":{"baseline":{"containers":["prod-db"]}}}
+EOF
+bash "$L" glen op1 "$T/product.json" --dry-run >/dev/null 2>&1; assert_eq "palabras que contienen prod e inputs no se rechazan" "$?" "0"
+
+# --- destinos por niveles ---
+mkdir -p "$RED_DATA_DIR"
+cat > "$RED_DATA_DIR/destinations.json" <<'EOF'
+{"destinations":[{"name":"qa-app","host":"10.9.9.21","level":2,"protect":["red_*"]},
+                 {"name":"prod-app","host":"10.9.9.98","level":3},
+                 {"name":"qa-ejemplo","host":"10.0.0.21","level":2,"example":true}]}
+EOF
+cat > "$OPD/authorizations.json" <<'EOF'
+{"destinations":[{"name":"qa-ejemplo","host":"10.0.0.21","roles":["baz"],"purpose":"x","approved_by":"usuario"},{"name":"qa-app","host":"10.9.9.21","roles":["baz","dembe"],"purpose":"desplegar y verificar","protect":["red_*"],"approved_by":"usuario"}]}
+EOF
+cat > "$T/qa.json" <<'EOF'
+{"task":"t6","objective":"desplegar la rama en QA y verificar health","criteria":["health 200"],"destinations":["qa-app"]}
+EOF
+out="$(dry baz op1 "$T/qa.json")"; rc=$?
+assert_eq "baz con destino autorizado arranca" "$rc" "0"
+assert_not_contains "con destino autorizado ssh deja de estar prohibido" "$out" '"Bash(ssh:*)"'
+assert_contains "el prompt nombra el host autorizado" "$out" "10.9.9.21"
+assert_contains "el prompt nombra lo protegido" "$out" "red_*"
+bash "$L" kaplan op1 "$T/qa.json" --dry-run >/dev/null 2>&1; assert_eq "rol no autorizado para el destino se rechaza" "$?" "3"
+sed 's/qa-app/prod-app/' "$T/qa.json" > "$T/pr.json"
+bash "$L" baz op1 "$T/pr.json" --dry-run >/dev/null 2>&1; assert_eq "destino nivel 3 se rechaza" "$?" "3"
+sed 's/"destinations":\["qa-app"\]/"destinations":[]/' "$T/qa.json" > "$T/nodest.json"
+bash "$L" baz op1 "$T/nodest.json" --dry-run >/dev/null 2>&1; assert_eq "desplegar sin destino autorizado se rechaza" "$?" "3"
+sed 's/qa-app/qa-ejemplo/' "$T/qa.json" > "$T/ej.json"
+bash "$L" baz op1 "$T/ej.json" --dry-run >/dev/null 2>&1; assert_eq "destino de ejemplo se rechaza" "$?" "3"
+assert_contains "sin destinos ssh sigue prohibido" "$(dry baz op1 "$BRIEF")" '"Bash(ssh:*)"'
+
+# --- worktree obligatorio para escribir codigo ---
+G="$T/repos/app"; mkdir -p "$G"; git init -q -b main "$G"; git -C "$G" -c user.email=t@t -c user.name=t commit -q --allow-empty -m i
+git -C "$G" worktree add -q -b feat/x "$T/repos/worktrees/app-x" 2>/dev/null
+WTN="$("$PY" -c "import os,sys;print(os.path.normpath(sys.argv[1]))" "$T/repos/worktrees/app-x")"
+"$PY" - "$OPD/state.json" "$WTN" "$G" <<'EOF'
+import json, sys
+p, wt, repo = sys.argv[1:]
+d = json.load(open(p)); d["worktrees"] = [{"repo": repo, "path": wt, "branch": "feat/x"}]
+json.dump(d, open(p, "w"))
+EOF
+bash "$L" baz op1 "$BRIEF" --cwd "$G" --dry-run >/dev/null 2>&1; assert_eq "baz en el checkout principal se rechaza" "$?" "4"
+bash "$L" baz op1 "$BRIEF" --cwd "$T/repos/worktrees/app-x" --dry-run >/dev/null 2>&1; assert_eq "baz en el worktree de la operacion arranca" "$?" "0"
+bash "$L" dembe op1 "$BRIEF" --cwd "$G" --dry-run >/dev/null 2>&1; assert_eq "dembe (solo lectura) puede leer el checkout principal" "$?" "0"
+mkdir -p "$T/nogit"
+bash "$L" baz op1 "$BRIEF" --cwd "$T/nogit" --dry-run >/dev/null 2>&1; assert_eq "baz fuera de git arranca" "$?" "0"
+git -C "$G" worktree remove --force "$T/repos/worktrees/app-x" 2>/dev/null
+
+# --- exclusion con running.json ---
+"$PY" -c "import os,time;print(os.getpid(),flush=True);time.sleep(60)" > "$T/pid.txt" &
+BG=$!
+for _ in $(seq 1 50); do [ -s "$T/pid.txt" ] && break; "$PY" -c "import time;time.sleep(0.1)"; done
+LIVE="$(cat "$T/pid.txt")"
+echo "{\"sessions\":[{\"role\":\"dembe\",\"pid\":$LIVE}]}" > "$OPD/running.json"
+bash "$L" kaplan op1 "$BRIEF" --dry-run >/dev/null 2>&1; assert_eq "kaplan rechazado con dembe vivo" "$?" "4"
+bash "$L" dembe op1 "$BRIEF" --dry-run >/dev/null 2>&1; assert_eq "segundo dembe rechazado" "$?" "4"
+bash "$L" glen op1 "$BRIEF" --dry-run >/dev/null 2>&1; assert_eq "otro rol si puede con dembe vivo" "$?" "0"
+echo "{\"sessions\":[{\"role\":\"kaplan\",\"pid\":$LIVE}]}" > "$OPD/running.json"
+bash "$L" glen op1 "$BRIEF" --dry-run >/dev/null 2>&1; assert_eq "nada arranca con kaplan vivo" "$?" "4"
+bash "$L" zeng op1 "$BRIEF" --dry-run >/dev/null 2>&1; assert_eq "zeng (solo lee costos) arranca con kaplan vivo" "$?" "0"
+echo "{\"sessions\":[{\"role\":\"zeng\",\"pid\":$LIVE}]}" > "$OPD/running.json"
+bash "$L" kaplan op1 "$BRIEF" --dry-run >/dev/null 2>&1; assert_eq "kaplan arranca con zeng viva" "$?" "0"
+bash "$L" zeng op1 "$BRIEF" --dry-run >/dev/null 2>&1; assert_eq "segunda zeng rechazada" "$?" "4"
+echo '{"sessions":[{"role":"dembe","pid":999999}]}' > "$OPD/running.json"
+bash "$L" kaplan op1 "$BRIEF" --dry-run >/dev/null 2>&1; assert_eq "sesiones muertas no bloquean" "$?" "0"
+kill "$BG" 2>/dev/null; wait "$BG" 2>/dev/null
+rm -f "$OPD/running.json"
+
+# --- ejecucion real contra un claude falso ---
+FAKE="$T/bin"; mkdir -p "$FAKE"
+cat > "$FAKE/claude.py" <<'EOF'
+import json, os, sys, time
+sys.stdin.read()
+path = os.environ["RED_FAKE_COUNTER"]
+n = (int(open(path).read()) if os.path.exists(path) else 0) + 1
+open(path, "w").write(str(n))
+open(path + ".args", "a").write(json.dumps(sys.argv[1:]) + "\n")
+open(path + ".env", "a").write(json.dumps({k: v for k, v in os.environ.items() if k.startswith(("GH_", "GITHUB_", "AWS_", "RED_", "ANTHROPIC_"))}) + "\n")
+mode = os.environ.get("RED_FAKE_MODE", "")
+if mode == "sleep":
+    time.sleep(float(os.environ.get("RED_FAKE_SLEEP", "3")))
+if mode == "fenced":
+    rep = {"estado": "COMPLETADO", "hecho": [], "contradicciones": []}
+    fence = chr(96) * 3
+    print(json.dumps({"result": fence + "json" + chr(10) + json.dumps(rep) + chr(10) + fence,
+                      "session_id": f"s-{n}", "total_cost_usd": 0.01}))
+    sys.exit(0)
+if mode == "empty_once" and n == 1:
+    print(json.dumps({"result": "", "session_id": "s-empty"}))
+else:
+    print(json.dumps({"result": "ESTADO COMPLETADO role=" + os.environ.get("RED_ROLE", ""),
+                      "session_id": f"s-{n}", "total_cost_usd": 0.01}))
+EOF
+export RED_CLAUDE_BIN="$FAKE/claude.py" RED_FAKE_COUNTER="$T/count"
+
+out="$(bash "$L" glen op1 "$BRIEF" 2>&1)"; rc=$?
+assert_eq "ejecucion real termina en 0" "$rc" "0"
+assert_contains "devuelve el session_id" "$out" "s-1"
+assert_contains "pasa RED_ROLE a la sesion" "$out" "role=glen"
+ls "$OPD"/sessions/glen-*.json >/dev/null 2>&1 && pass "guarda la sesion en sessions/" || fail "guarda la sesion en sessions/"
+assert_contains "registra lanzado en el ledger" "$(cat "$OPD/ledger.jsonl")" '"evento": "lanzado"'
+assert_contains "registra reporte en el ledger" "$(cat "$OPD/ledger.jsonl")" '"evento": "reporte"'
+assert_eq "limpia running.json al terminar" "$(json_get "$OPD/running.json" sessions)" "[]"
+assert_contains "los argumentos con * y parentesis llegan intactos" "$(cat "$T/count.args")" '"Bash(kubectl:*)"'
+
+rm -f "$T/count" "$T/count.args"
+out="$(RED_FAKE_MODE=empty_once bash "$L" baz op1 "$BRIEF" 2>&1)"
+assert_eq "relanza una vez ante resultado vacio" "$(cat "$T/count")" "2"
+assert_contains "registra la falla por vacio" "$(cat "$OPD/ledger.jsonl")" '"evento": "vacio"'
+assert_contains "el relanzamiento retoma la sesion vacia" "$(sed -n 2p "$T/count.args")" '"--resume", "s-empty"'
+
+# --- resume de baz retoma en el worktree donde nacio la sesion ---
+git -C "$G" worktree add -q -b feat/y "$T/repos/worktrees/app-y" 2>/dev/null
+WTY="$("$PY" -c "import os,sys;print(os.path.normpath(sys.argv[1]))" "$T/repos/worktrees/app-y")"
+"$PY" - "$OPD/state.json" "$WTY" "$G" <<'EOF'
+import json, sys
+p, wt, repo = sys.argv[1:]
+d = json.load(open(p)); d["worktrees"] = [{"repo": repo, "path": wt, "branch": "feat/y"}]
+json.dump(d, open(p, "w"))
+EOF
+out="$(bash "$L" baz op1 "$BRIEF" --cwd "$T/repos/worktrees/app-y" 2>&1)"
+SID="$("$PY" -c "import json,sys;print(json.loads(sys.stdin.read())['session_id'])" <<< "$out")"
+out="$(bash "$L" baz op1 "$BRIEF" --resume "$SID" --message "falta evidencia" --dry-run 2>&1)"; rc=$?
+assert_eq "resume de baz sin --cwd arranca" "$rc" "0"
+assert_contains "resume de baz usa el cwd de la sesion original" "$out" "app-y"
+git -C "$G" worktree remove --force "$T/repos/worktrees/app-y" 2>/dev/null
+echo '{"op":"op1","status":"executing"}' > "$OPD/state.json"
+
+# --- archivos corruptos dan codigos documentados ---
+cp "$OPD/authorizations.json" "$T/auth.bak"; echo '{roto' > "$OPD/authorizations.json"
+bash "$L" baz op1 "$T/qa.json" --dry-run >/dev/null 2>&1; assert_eq "authorizations corrupto sale con 3" "$?" "3"
+cp "$T/auth.bak" "$OPD/authorizations.json"
+
+# --- reporte envuelto en bloque de codigo ---
+out="$(RED_FAKE_MODE=fenced bash "$L" glen op1 "$BRIEF" 2>&1)"
+assert_eq "desenvuelve el reporte JSON del bloque de codigo" "$("$PY" -c "import json,sys;print(json.loads(sys.stdin.read())['report']['estado'])" <<< "$out")" "COMPLETADO"
+assert_contains "registra el estado del reporte en el ledger" "$(tail -1 "$OPD/ledger.jsonl")" '"estado": "COMPLETADO"'
+out="$(bash "$L" glen op1 "$BRIEF" 2>&1)"
+assert_eq "un reporte que no es JSON queda como report null" "$("$PY" -c "import json,sys;print(json.loads(sys.stdin.read())['report'])" <<< "$out")" "None"
+
+# --- concurrencia (B3): dos lanzamientos simultaneos ---
+rm -f "$T/count"
+RED_FAKE_MODE=sleep RED_FAKE_SLEEP=3 bash "$L" glen op1 "$BRIEF" > "$T/g.out" 2>&1 &
+P1=$!
+RED_FAKE_MODE=sleep RED_FAKE_SLEEP=3 bash "$L" baz op1 "$BRIEF" > "$T/b.out" 2>&1 &
+P2=$!
+for _ in $(seq 1 60); do
+  n="$("$PY" -c "import json,sys;print(len(json.load(open(sys.argv[1]))['sessions']))" "$OPD/running.json" 2>/dev/null || echo 0)"
+  [ "$n" = "2" ] && break; "$PY" -c "import time;time.sleep(0.1)"
+done
+assert_eq "dos lanzamientos en paralelo quedan ambos registrados" "$n" "2"
+bash "$L" glen op1 "$BRIEF" --dry-run >/dev/null 2>&1; assert_eq "mismo rol en paralelo se rechaza" "$?" "4"
+wait "$P1" "$P2"
+assert_eq "al terminar ambos running.json queda vacio" "$(json_get "$OPD/running.json" sessions)" "[]"
+
+# --- timeout (S7) ---
+out="$(RED_FAKE_MODE=sleep RED_FAKE_SLEEP=20 RED_TIMEOUT_SECONDS=2 bash "$L" glen op1 "$BRIEF" 2>&1)"; rc=$?
+assert_eq "sesion colgada termina con codigo 5" "$rc" "5"
+assert_contains "registra el timeout en el ledger" "$(cat "$OPD/ledger.jsonl")" '"evento": "timeout"'
+assert_eq "tras timeout running.json queda vacio" "$(json_get "$OPD/running.json" sessions)" "[]"
+
+cd / && rm -rf "$T"
+finish
