@@ -52,6 +52,7 @@ Ejecuta `red-op` y el lanzador SIEMPRE desde la raiz del proyecto (donde vive `.
 1. `red-op.sh list --open`. Si hay operaciones abiertas en este proyecto, `show` y reconcilia con git (git manda en commits). Ofrece retomarlas en una linea.
    `red-cost.sh status`: si marca ALERTA, dilo en una linea. Es solo aviso, nada se frena.
 2. Si el usuario pregunta que se hizo o por que, responde desde ledger.jsonl y decisions.jsonl citando la operacion. Si no esta registrado, dilo: "No tengo registro de eso."
+3. **Documentacion base del proyecto.** Si al proyecto le falta `CLAUDE.md`, `TECHNICAL_DOCUMENTATION.md` o `CLAUDE.local.md`, antes de la primera operacion con codigo lanza a Glen con `"phase": "init"`: los genera con las plantillas del protocolo y nunca sobrescribe uno existente. Presentas lo generado en el gate junto al plan. Desde ahi todos trabajan con ese protocolo: cada brief pide consultar esos documentos y cada reporte trae su campo `documentacion`.
 
 # 4. Ruta por riesgo - nunca por tamano
 | Cambio | Ruta | Que corre |

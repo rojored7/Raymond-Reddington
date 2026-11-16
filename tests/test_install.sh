@@ -24,6 +24,7 @@ ls "$C"/red/backups/*/settings.json >/dev/null 2>&1 && pass "respalda settings.j
 [ -f "$C/red/scripts/launch-operative.sh" ] && pass "instala scripts" || fail "instala scripts"
 [ -f "$C/red/hooks/red-stop-guard.sh" ] && pass "instala hooks" || fail "instala hooks"
 [ -f "$C/red/lib/common.py" ] && pass "instala lib" || fail "instala lib"
+for f in CLAUDE.local.md prompt-init.md prompt-techdoc.md; do [ -f "$C/red/templates/protocol/$f" ] && pass "instala plantilla $f" || fail "instala plantilla $f"; done
 s="$(cat "$C/settings.json")"
 assert_eq "no impone agent red global" "$(json_get "$C/settings.json" agent)" ""
 [ -f "$C/red/scripts/red.sh" ] && pass "instala el lanzador red.sh" || fail "instala el lanzador red.sh"
@@ -89,6 +90,7 @@ EOF
 bash "$I" uninstall >/dev/null 2>&1; assert_eq "uninstall termina en 0" "$?" "0"
 [ ! -f "$C/agents/glen.md" ] && pass "quita agentes instalados" || fail "quita agentes instalados"
 [ ! -f "$C/agents/zeng.md" ] && pass "quita zeng" || fail "quita zeng"
+[ ! -d "$C/red/templates/protocol" ] && pass "quita las plantillas del protocolo" || fail "quita las plantillas del protocolo"
 assert_contains "restaura el borrador previo de red" "$(cat "$C/agents/red.md" 2>/dev/null)" "borrador viejo"
 assert_eq "quita agent de settings.json" "$(json_get "$C/settings.json" agent)" ""
 assert_contains "conserva el hook del usuario en una entrada compartida" "$(cat "$C/settings.json")" "mio-en-la-misma-entrada"
