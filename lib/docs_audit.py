@@ -25,7 +25,15 @@ def _op_path(op_id):
 
 
 def _norm(rel):
-    return rel.replace("\\", "/").lstrip("./")
+    """Ruta relativa con '/', sin el prefijo './'. Las rutas con '..' se rechazan antes."""
+    rel = rel.replace("\\", "/")
+    while rel.startswith("./"):
+        rel = rel[2:]
+    return rel
+
+
+def _escapes(rel):
+    return ".." in rel.replace("\\", "/").split("/") or os.path.isabs(rel)
 
 
 def justified_docs(path):
@@ -45,11 +53,31 @@ def justified_docs(path):
     return out
 
 
+def _git_list(repo, args):
+    """Rutas separadas por NUL y sin comillas (nombres no ASCII intactos). Un error de git es un error."""
+    ok, out, err = run(["git", "-c", "core.quotepath=false", "-C", repo] + args, timeout=60)
+    if not ok:
+        fail(f"git {' '.join(args[:2])} fallo: {err.strip()[:300]}")
+    return [p for p in out.split("\x00") if p]
+
+
 def new_md_files(repo, base):
-    """.md agregados desde la base (commiteados) y los que aun no estan en git (sin ignorar)."""
-    added = run(["git", "-C", repo, "diff", "--name-only", "--diff-filter=A", base, "HEAD"])[1].splitlines()
-    untracked = run(["git", "-C", repo, "ls-files", "--others", "--exclude-standard"])[1].splitlines()
+    """.md agregados respecto de la base: commiteados, staged o sin commitear, y los que git no sigue."""
+    added = _git_list(repo, ["diff", "--name-only", "-z", "--diff-filter=A", base, "--"])
+    untracked = _git_list(repo, ["ls-files", "--others", "--exclude-standard", "-z"])
     return sorted({_norm(p) for p in added + untracked if p.strip().lower().endswith(".md")})
+
+
+def resolve_repo_and_base(repo_arg, base_arg):
+    ok, top, _ = run(["git", "-C", repo_arg, "rev-parse", "--show-toplevel"])
+    if not ok or not top.strip():
+        fail(f"--repo no es un repositorio git: {repo_arg}")
+    repo = os.path.normpath(top.strip())
+    ok, sha, _ = run(["git", "-C", repo, "rev-parse", "--verify", "--quiet", "--end-of-options",
+                      f"{base_arg}^{{commit}}"])
+    if not ok or not sha.strip():
+        fail(f"--base no es un commit de {repo}: {base_arg}")
+    return repo, sha.strip()
 
 
 def classify(files, justified):
@@ -68,6 +96,8 @@ def classify(files, justified):
 
 def cmd_doc(a):
     path = _op_path(a.op)
+    if _escapes(a.path):
+        fail(f"{a.path}: la ruta debe ser relativa al repo y sin '..'")
     rel = _norm(a.path)
     if not rel.lower().endswith(".md"):
         fail(f"{a.path} no es un .md: red-op doc solo registra documentos")
@@ -79,9 +109,9 @@ def cmd_doc(a):
 
 def cmd_md_audit(a):
     path = _op_path(a.op)
-    repo = os.path.normpath(run(["git", "-C", a.repo, "rev-parse", "--show-toplevel"])[1].strip() or a.repo)
-    allowed, unjustified = classify(new_md_files(repo, a.base), justified_docs(path))
-    print(json.dumps({"repo": repo, "base": a.base, "permitidos": allowed, "sin_justificacion": unjustified},
+    repo, base = resolve_repo_and_base(a.repo, a.base)
+    allowed, unjustified = classify(new_md_files(repo, base), justified_docs(path))
+    print(json.dumps({"repo": repo, "base": base, "permitidos": allowed, "sin_justificacion": unjustified},
                      ensure_ascii=False, indent=1))
     if unjustified:
         raise SystemExit(EXIT_UNJUSTIFIED)

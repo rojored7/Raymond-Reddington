@@ -188,6 +188,24 @@ assert_eq "un .md sin commitear tambien cuenta" "$rc" "1"
 assert_contains "md-audit ve archivos sin commitear" "$out" "sin-commit.md"
 rm "$M/sin-commit.md"; git -C "$M" rm -q notas-sueltas.md; git -C "$M" -c user.email=t@t -c user.name=t commit -q -m limpio
 bash "$R" md-audit "$OPM" --repo "$M" --base "$MBASE" >/dev/null; assert_eq "sin .md basura sale con 0" "$?" "0"
+echo f > "$M/staged.md"; git -C "$M" add staged.md
+out="$(bash "$R" md-audit "$OPM" --repo "$M" --base "$MBASE")"; rc=$?
+assert_eq "un .md staged sin commit tambien cuenta" "$rc" "1"
+assert_contains "md-audit ve lo staged" "$out" "staged.md"
+git -C "$M" rm -q --cached staged.md; rm -f "$M/staged.md"
+printf 'g\n' > "$M/$(printf '\xc3\xb1and\xc3\xba').md"
+out="$(bash "$R" md-audit "$OPM" --repo "$M" --base "$MBASE")"; rc=$?
+assert_eq "un .md con nombre no ASCII tambien cuenta" "$rc" "1"
+rm -f "$M"/*and*.md
+bash "$R" md-audit "$OPM" --repo "$M" --base no-existe >/dev/null 2>&1; assert_eq "base invalida es error (2), no limpio" "$?" "2"
+bash "$R" md-audit "$OPM" --repo "$T/no-es-repo" --base "$MBASE" >/dev/null 2>&1; assert_eq "repo invalido es error (2), no limpio" "$?" "2"
+bash "$R" md-audit "$OPM" --repo "$M" --base "--output=$T/pisado" >/dev/null 2>&1
+[ ! -e "$T/pisado" ] && pass "una base con forma de opcion no llega a git" || fail "una base con forma de opcion no llega a git"
+bash "$R" doc "$OPM" --path ../fuera.md --why x >/dev/null 2>&1; assert_eq "doc rechaza rutas con .." "$?" "2"
+mkdir -p "$M/.outputs"; echo h > "$M/.outputs/x.md"
+out="$(bash "$R" md-audit "$OPM" --repo "$M" --base "$MBASE")"
+assert_contains ".outputs/ no se confunde con outputs/" "$out" '".outputs/x.md"'
+rm -rf "$M/.outputs"
 
 # --- targets: la retro de Dembe corre al cerrar el target, no cada operacion ---
 cd "$P" || exit 1
