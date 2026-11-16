@@ -1,6 +1,7 @@
 # Helpers compartidos por los tests de red-system. Se carga con: source tests/lib.sh
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PY="$(command -v python || command -v python3)"
+# Mismo resolvedor que el producto: en Windows "python" puede ser el stub de la Microsoft Store.
+source "$ROOT/scripts/_python.sh" || exit 2
 PASS=0
 FAIL=0
 
