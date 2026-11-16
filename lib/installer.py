@@ -19,7 +19,7 @@ from common import CorruptJSON, read_json_strict, to_native, write_json  # noqa:
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CODE_DIRS = ("scripts", "hooks", "lib", os.path.join("templates", "protocol"))
-SEED_FILES = ("reputation.json", "ops-index.json", "destinations.json", "budget.json")
+SEED_FILES = ("reputation.json", "ops-index.json", "destinations.json", "budget.json", "lecciones-aprendidas.md")
 HOOKS = {"PreToolUse": ("Bash", "guard-worktree-deletion.sh"), "Stop": (None, "red-stop-guard.sh")}
 EXIT_CORRUPT = 3
 

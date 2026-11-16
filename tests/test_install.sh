@@ -40,17 +40,20 @@ assert_eq "siembra destinos de ejemplo marcados" "$(json_get "$C/red/destination
 assert_not_contains "la plantilla no trae IPs reales" "$(cat "$ROOT/templates/destinations.json")" "192.168"
 assert_eq "siembra tope mensual de 150" "$(json_get "$C/red/budget.json" monthly_usd)" "150"
 assert_eq "siembra alerta al 80" "$(json_get "$C/red/budget.json" alert_pct)" "80"
+assert_contains "siembra las lecciones aprendidas" "$(cat "$C/red/lecciones-aprendidas.md" 2>/dev/null)" "Lecciones aprendidas"
 [ -f "$C/red/scripts/red-cost.sh" ] && pass "instala red-cost" || fail "instala red-cost"
 assert_contains "siembra destinos con PROD nivel 3" "$(json_get "$C/red/destinations.json" destinations.1.level)" "3"
 assert_eq "settings.local.json no se toca" "$(same_json "$C/settings.local.json" "$T/local.orig")" "True"
 
 echo '{"agents":{"baz":{"test-writing":3}}}' > "$C/red/reputation.json"
+echo "leccion propia" >> "$C/red/lecciones-aprendidas.md"
 echo '{"destinations":[{"name":"mio","level":2}]}' > "$C/red/destinations.json"
 echo '{"monthly_usd": 300, "alert_pct": 90}' > "$C/red/budget.json"
 bash "$I" install >/dev/null 2>&1
 assert_contains "reinstalar no pisa la reputacion" "$(cat "$C/red/reputation.json")" "test-writing"
 assert_eq "reinstalar no pisa el presupuesto" "$(json_get "$C/red/budget.json" monthly_usd)" "300"
 assert_contains "reinstalar no pisa los destinos del usuario" "$(cat "$C/red/destinations.json")" "mio"
+assert_contains "reinstalar no pisa las lecciones" "$(cat "$C/red/lecciones-aprendidas.md")" "leccion propia"
 n="$(grep -o 'red-stop-guard.sh' "$C/settings.json" | wc -l | tr -d ' ')"
 assert_eq "reinstalar no duplica hooks" "$n" "1"
 

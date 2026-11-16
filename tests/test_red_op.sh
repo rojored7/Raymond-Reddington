@@ -189,6 +189,28 @@ assert_contains "md-audit ve archivos sin commitear" "$out" "sin-commit.md"
 rm "$M/sin-commit.md"; git -C "$M" rm -q notas-sueltas.md; git -C "$M" -c user.email=t@t -c user.name=t commit -q -m limpio
 bash "$R" md-audit "$OPM" --repo "$M" --base "$MBASE" >/dev/null; assert_eq "sin .md basura sale con 0" "$?" "0"
 
+# --- targets: la retro de Dembe corre al cerrar el target, no cada operacion ---
+cd "$P" || exit 1
+TA="$(bash "$R" new login-api --target login)"; TB="$(bash "$R" new login-ui --target login)"
+assert_eq "new guarda el target" "$(json_get "$P/.red/ops/$TA/state.json" target)" "login"
+assert_contains "el indice guarda el target" "$(cat "$RED_DATA_DIR/ops-index.json")" '"target": "login"'
+out="$(bash "$R" close "$TA" --summary "api lista")"
+assert_contains "cerrar con otra op del target abierta lo dice" "$out" "$TB"
+assert_eq "sin target completo no hay retro pendiente" "$(json_get "$P/.red/ops/$TA/state.json" retro)" ""
+out="$(bash "$R" close "$TB" --summary "ui lista")"
+assert_contains "cerrar la ultima op anuncia el target completo" "$out" "TARGET login COMPLETO"
+assert_eq "deja la retro pendiente en la ultima op" "$(json_get "$P/.red/ops/$TB/state.json" retro.estado)" "pendiente"
+assert_contains "la retro nombra todas las ops del target" "$(json_get "$P/.red/ops/$TB/state.json" retro.ops)" "$TA"
+echo '{"estado":"COMPLETADO"}' > "$T/retro.json"
+bash "$R" retro "$TB" --done --report "$T/retro.json"
+assert_eq "retro --done la marca hecha" "$(json_get "$P/.red/ops/$TB/state.json" retro.estado)" "hecha"
+bash "$R" retro "$TB" --done --report "$T/no-existe.json" >/dev/null 2>&1; assert_eq "retro sin reporte existente falla" "$?" "2"
+TS="$(bash "$R" new suelta)"
+assert_eq "sin --target la op es su propio target" "$(json_get "$P/.red/ops/$TS/state.json" target)" "$TS"
+assert_contains "una op suelta completa su target al cerrar" "$(bash "$R" close "$TS")" "COMPLETO"
+TC="$(bash "$R" new reasignada)"; bash "$R" target "$TC" login-v2
+assert_eq "target reasigna" "$(json_get "$P/.red/ops/$TC/state.json" target)" "login-v2"
+
 # --- alertas: el canal de los tenientes hacia Red ---
 cd "$P" || exit 1
 AOP="$(bash "$R" new alertas)"; AD="$P/.red/ops/$AOP"

@@ -58,6 +58,15 @@ def decide(payload, role):
     for state_file in sorted(glob.glob(os.path.join(cwd, ".red", "ops", "*", "state.json"))):
         op_path = os.path.dirname(state_file)
         state = read_json(state_file, {}) or {}
+        retro = state.get("retro") or {}
+        if retro.get("estado") == "pendiente":
+            if live_sessions(op_path):
+                return None
+            if not should_step_aside(op_path):
+                blocks.append(f"target {retro.get('target')} entregado: falta la retro de Dembe (phase retro "
+                              f"sobre {', '.join(retro.get('ops', []))}; luego red-op retro "
+                              f"{os.path.basename(op_path)} --done --report <archivo>)")
+            continue
         if is_terminal(state.get("status")):
             continue
         if state.get("status") in ("intake", "awaiting-approval"):

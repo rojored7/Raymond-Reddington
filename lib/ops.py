@@ -17,6 +17,7 @@ from common import (EXIT_CORRUPT, OP_STATUSES, CorruptJSON, append_jsonl, data_d
                     fail, file_lock, is_terminal, ledger, live_sessions, now, op_dir, ops_root,
                     project_root, read_json_strict, run, write_json)
 import docs_audit  # noqa: E402
+import targets  # noqa: E402
 
 STRIKE_TIERS = ("limpio", "rehacer", "probacion", "veto")
 ROLES = ("glen", "baz", "dembe", "kaplan", "zeng")
@@ -82,10 +83,10 @@ def cmd_new(a):
     os.makedirs(path)
     write_json(os.path.join(path, "state.json"), {
         "op": op_id, "status": "intake", "objective": a.objective, "route": a.route,
-        "branches": [], "worktrees": [], "created": now(), "updated": now()})
+        "target": a.target or op_id, "branches": [], "worktrees": [], "created": now(), "updated": now()})
     write_json(os.path.join(path, "tracker.json"), {"op": op_id, "tasks": []})
     ledger(path, "creada", op=op_id, nota=a.objective)
-    _index_update(op_id, objective=a.objective, status="intake")
+    _index_update(op_id, objective=a.objective, status="intake", target=a.target or op_id)
     _ensure_gitignore(root)
     print(op_id)
 
@@ -442,13 +443,16 @@ def cmd_close(a):
     _set_state(a.op, status="complete", summary=a.summary, closed=now())
     ledger(path, "cerrada", nota=a.summary)
     _index_update(a.op, status="complete")
+    targets.on_close(a.op, path, _global("ops-index.json"), _set_state)
 
 
 def build_parser():
     p = argparse.ArgumentParser(prog="red-op")
     sub = p.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("new"); s.add_argument("slug"); s.add_argument("--objective", default="")
-    s.add_argument("--route", default=None); s.set_defaults(fn=cmd_new)
+    s.add_argument("--route", default=None)
+    s.add_argument("--target", default=None, help="lo que pidio el usuario; varias ops pueden compartirlo")
+    s.set_defaults(fn=cmd_new)
     s = sub.add_parser("state"); s.add_argument("op"); s.add_argument("status"); s.set_defaults(fn=cmd_state)
     s = sub.add_parser("decide"); s.add_argument("op"); s.add_argument("--decision", required=True)
     s.add_argument("--why", required=True); s.add_argument("--alternatives", default="")
@@ -484,6 +488,7 @@ def build_parser():
     s = sub.add_parser("show"); s.add_argument("op"); s.set_defaults(fn=cmd_show)
     s = sub.add_parser("list"); s.add_argument("--open", action="store_true"); s.set_defaults(fn=cmd_list)
     docs_audit.register(sub)
+    targets.register(sub, _require_op, _set_state, _index_update)
     s = sub.add_parser("alerts"); s.add_argument("op"); s.add_argument("--wait", action="store_true")
     s.add_argument("--interval", type=float, default=5.0); s.set_defaults(fn=cmd_alerts)
     s = sub.add_parser("close"); s.add_argument("op"); s.add_argument("--summary", default="")
