@@ -390,6 +390,20 @@ print(unverified, audit["ok"], audit["sin_verificar"])
 EOF
 )"
 assert_eq "si git status falla la auditoria queda sin verificar y no ok" "$check" "True False True"
+check="$("$PY" - "$ROOT/lib" <<'EOF'
+import sys
+sys.path.insert(0, sys.argv[1])
+import flow_control
+before = {"head": "a", "root": ".", "files": {}}
+after = {"head": "b", "root": ".", "files": {"app.py": "x"}}
+out, committed, unverified = flow_control.changes_outside(before, after, "*", ".")
+audit = flow_control.build_audit({"agentes_lanzados": [], "ediciones_directas": []}, [], out, committed, True, unverified)
+print(audit["cambios_fuera_de_fase"], "|", audit["commits_en_fase"], "|", audit["ok"])
+EOF
+)"
+assert_contains "fase sin restriccion: los cambios se declaran N/A, no limpios" "$check" "N/A"
+assert_not_contains "fase sin restriccion: commits no se reporta como false" "$check" "| False |"
+assert_contains "fase sin restriccion: no evaluado no baja ok" "$check" "| True"
 cp "$T/state.bak" "$OPD/state.json"
 
 # --- entorno invalido y claude ausente: codigos documentados, sin traceback ---

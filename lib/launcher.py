@@ -305,8 +305,9 @@ def ledger_audit(path, role, task, audit):
         ledger(path, "edicion-directa", agent=role, task=task, nota=", ".join(audit["ediciones_directas"]))
     if audit["sin_verificar"]:
         ledger(path, "auditoria-sin-verificar", agent=role, task=task, nota="git status fallo: cambios sin auditar")
-    if audit["cambios_fuera_de_fase"] or audit["commits_en_fase"]:
-        nota = ", ".join(audit["cambios_fuera_de_fase"]) + (" (+commits)" if audit["commits_en_fase"] else "")
+    outside, committed = audit["cambios_fuera_de_fase"], audit["commits_en_fase"]
+    if isinstance(outside, list) and (outside or committed is True):
+        nota = ", ".join(outside) + (" (+commits)" if committed is True else "")
         ledger(path, "cambios-fuera-de-fase", agent=role, task=task, nota=nota)
 
 

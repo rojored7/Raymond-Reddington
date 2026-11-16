@@ -69,6 +69,8 @@ def flow_prompt(flow_name, flow_cfg, phase):
 
 
 GIT = ["git", "-c", "core.quotepath=false"]
+NOT_EVALUATED = "N/A - la fase permite escribir en todo el espacio de trabajo"
+NOT_GIT = "N/A - el directorio de trabajo no esta en git"
 
 
 def _status_paths(text):
@@ -116,9 +118,13 @@ def _committed_paths(before, after):
 
 
 def changes_outside(before, after, allowed, root):
-    """(rutas fuera de lo permitido, hubo commits, sin_verificar) entre dos snapshots."""
-    if allowed == "*" or before is None:
-        return [], False, False
+    """(rutas fuera de lo permitido, hubo commits, sin_verificar) entre dos snapshots.
+
+    Una fase sin restriccion ("*") no se evalua: devuelve N/A, nunca un 'limpio' que no se miro."""
+    if allowed == "*":
+        return NOT_EVALUATED, NOT_EVALUATED, False
+    if before is None:
+        return NOT_GIT, NOT_GIT, False
     if after is None or "error" in before or "error" in after:
         return [], False, True
     paths = {p for p in set(before["files"]) | set(after["files"])
@@ -137,4 +143,10 @@ def build_audit(stream_audit, required, outside, committed, coordinator, unverif
     direct = stream_audit["ediciones_directas"] if coordinator else []
     return {"agentes_requeridos": required, "agentes_lanzados": launched, "agentes_faltantes": missing,
             "ediciones_directas": direct, "cambios_fuera_de_fase": outside, "commits_en_fase": committed,
-            "sin_verificar": unverified, "ok": not (missing or direct or outside or committed or unverified)}
+            "sin_verificar": unverified,
+            "ok": not (missing or direct or unverified or _flagged(outside) or _flagged(committed))}
+
+
+def _flagged(value):
+    """Un N/A declarado no es una falta; una lista con rutas o un True si lo son."""
+    return bool(value) and not (isinstance(value, str) and value.startswith("N/A"))
