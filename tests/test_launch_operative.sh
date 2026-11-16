@@ -193,6 +193,10 @@ if mode == "dirty":
     open("app.py", "a").write("# cambio en fase plan\n")
     os.makedirs("outputs", exist_ok=True)
     open(os.path.join("outputs", "00b.md"), "w").write("ok\n")
+if mode == "leaky":
+    emit({"type": "user", "message": {"content": [{"type": "tool_result", "content": "DB_PASSWORD=supersecreto123 y la clave sk-abcdefghijklmnopqrstuvwx"}]}})
+    result('{"estado": "COMPLETADO"}')
+    sys.exit(0)
 if mode == "glen_writes":
     tool("Write", {"file_path": "CLAUDE.md"})
     result('{"estado": "COMPLETADO", "nota": "documentacion generada, sección 2"}')
@@ -345,6 +349,13 @@ sed 's/"task":"t1"/"task":"t1","phase":"init"/' "$BRIEF" > "$T/glen-init.json"
 out="$(RED_FAKE_MODE=glen_writes bash "$L" glen op1 "$T/glen-init.json" 2>&1)"
 assert_eq "glen escribiendo sus documentos no es edicion directa" "$(aud ediciones_directas)" "[]"
 assert_eq "la auditoria de glen queda ok" "$(aud ok)" "True"
+
+# --- los registros de sesion no guardan secretos en claro ---
+out="$(RED_FAKE_MODE=leaky bash "$L" glen op1 "$BRIEF" 2>&1)"
+rec="$("$PY" -c "import json,sys;print(json.loads(sys.stdin.read())['file'])" <<< "$out")"
+assert_not_contains "el registro no guarda contrasenas" "$(cat "$rec")" "supersecreto123"
+assert_not_contains "el registro no guarda claves de API" "$(cat "$rec")" "sk-abcdefghijklmnopqrstuvwx"
+assert_contains "el registro marca lo redactado" "$(cat "$rec")" "REDACTADO"
 
 # --- la salida del lanzador es UTF-8 aunque la consola de Windows sea cp1252 ---
 RED_FAKE_MODE=glen_writes bash "$L" glen op1 "$T/glen-init.json" > "$T/utf8.out" 2>/dev/null

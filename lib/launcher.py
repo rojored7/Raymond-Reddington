@@ -21,7 +21,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import (CorruptJSON, append_jsonl, data_dir, file_lock, ledger, live_sessions,  # noqa: E402
-                    now, op_dir, read_json, read_json_strict, run, to_native, utf8_stdio, write_json)
+                    now, op_dir, read_json, read_json_strict, redact, run, to_native, utf8_stdio,
+                    write_json)
 from session_stream import StreamTimeout, audit_events, run_stream  # noqa: E402
 
 try:  # el control de fases depende del guard de escritura: si no carga, no se lanza a nadie
@@ -318,7 +319,7 @@ def save_session(a, role, path, attempt, cmd, code, summary, audit, raw, err):
     record_file = os.path.join(sessions_dir, f"{role}-{len(os.listdir(sessions_dir)) + 1}.json")
     write_json(record_file, {"ts": now(), "role": role, "phase": a.phase, "flow": a.flow_name,
                              "attempt": attempt, "exit": code, "cwd": a.cwd, "cmd": cmd, "payload": summary,
-                             "auditoria": audit, "raw": raw[-20000:], "stderr": err[-5000:]})
+                             "auditoria": audit, "raw": redact(raw[-20000:]), "stderr": redact(err[-5000:])})
     return record_file
 
 

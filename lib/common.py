@@ -3,6 +3,7 @@ import contextlib
 import datetime
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -223,6 +224,23 @@ def run(cmd, cwd=None, timeout=30):
     if proc.returncode != 0:
         return False, proc.stdout, (proc.stderr or "").strip() or f"exit={proc.returncode}"
     return True, proc.stdout, None
+
+
+SECRET_PATTERNS = (
+    re.compile(r"(?i)\b([A-Z0-9_]*(?:PASSWORD|PASSWD|PWD|SECRET|TOKEN|API_?KEY|ACCESS_?KEY|PRIVATE_?KEY)"
+               r"[A-Z0-9_]*)\s*[=:]\s*['\"]?[^\s'\"]+"),
+    re.compile(r"\b(?:sk|pk|rk)-[A-Za-z0-9_-]{16,}"),
+    re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}"),
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.S),
+)
+
+
+def redact(text):
+    """Quita secretos evidentes antes de guardar salidas de sesiones en disco."""
+    for pattern in SECRET_PATTERNS:
+        text = pattern.sub(lambda m: (f"{m.group(1)}=[REDACTADO]" if m.groups() else "[REDACTADO]"), text)
+    return text
 
 
 def utf8_stdio():

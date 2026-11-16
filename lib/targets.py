@@ -19,6 +19,8 @@ def target_ops(index, target, project):
 def on_close(op_id, path, index_path, set_state):
     """Tras cerrar op_id: si el target quedo completo deja la retro pendiente y lo anuncia."""
     state = read_json_strict(os.path.join(path, "state.json"))
+    if (state.get("retro") or {}).get("estado") == "hecha":
+        return  # cerrar de nuevo no rearma una retro ya hecha
     target = state.get("target") or op_id
     ops = target_ops(read_json_strict(index_path, {"ops": []}), target, project_root())
     still_open = [o["op"] for o in ops if o["op"] != op_id and not is_terminal(o.get("status"))]

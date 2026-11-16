@@ -8,6 +8,7 @@ import argparse
 import datetime
 import json
 import os
+import collections
 import re
 import sys
 import time
@@ -262,8 +263,11 @@ def _only_red_gitignore(repo):
     """El .gitignore cuenta como cambio de Red si lo unico agregado es la linea .red/."""
     ok, diff, _ = run(["git", "-C", repo, "diff", "HEAD", "--", ".gitignore"])
     if ok and diff.strip():
-        changed = [ln for ln in diff.splitlines() if ln[:1] in "+-" and ln[:3] not in ("+++", "---")]
-        return changed == ["+.red/"]
+        lines = [ln for ln in diff.splitlines() if ln[:3] not in ("+++", "---")]
+        added = collections.Counter(ln[1:] for ln in lines if ln.startswith("+"))
+        removed = collections.Counter(ln[1:] for ln in lines if ln.startswith("-"))
+        # un archivo sin salto final reaparece como -linea/+linea: lo unico neto agregado debe ser .red/
+        return not (removed - added) and (added - removed) == collections.Counter([".red/"])
     try:
         with open(os.path.join(repo, ".gitignore"), encoding="utf-8") as fh:
             return [ln for ln in fh.read().splitlines() if ln.strip()] == [".red/"]
@@ -284,6 +288,15 @@ def cmd_branch(a):
     repo = _repo_top(a.repo)
     mine = _registered(read_json_strict(os.path.join(path, "state.json")), "branches", repo)
     if mine:
+        current = run(["git", "-C", repo, "branch", "--show-current"])[1].strip()
+        if current != mine["branch"]:
+            dirty = _foreign_changes(repo)
+            if dirty:
+                fail(f"el checkout esta en '{current}' con cambios sin commitear ({', '.join(dirty[:5])}): "
+                     f"no se cambia a '{mine['branch']}'", EXIT_BUSY)
+            ok, _, err = run(["git", "-C", repo, "switch", mine["branch"]], timeout=60)
+            if not ok:
+                fail(f"no se pudo volver a la rama {mine['branch']}: {err}", EXIT_BUSY)
         print(mine["branch"])
         return
     dirty = _foreign_changes(repo)
@@ -311,9 +324,10 @@ def _warn(message):
     print(f"[red-op] AVISO: {message}", file=sys.stderr)
 
 
-def _prepare_compose(repo, wt):
+def _prepare_compose(repo, wt, copy_env):
     """Un worktree con compose levantaria un segundo stack con el mismo nombre de proyecto y sin .env
-    (esta en .gitignore). Se fija un COMPOSE_PROJECT_NAME propio y se copia el .env, avisando."""
+    (esta en .gitignore). Se fija un COMPOSE_PROJECT_NAME propio. El .env del checkout (secretos) solo se
+    copia con --copy-env explicito, con permisos 600."""
     found = [f for f in COMPOSE_FILES if os.path.isfile(os.path.join(repo, f))]
     if not found:
         return None
@@ -324,13 +338,20 @@ def _prepare_compose(repo, wt):
               "antes de usar docker compose ahi")
         return project
     content = ""
-    if os.path.isfile(env_src):
+    if copy_env and os.path.isfile(env_src):
         with open(env_src, encoding="utf-8", errors="replace") as fh:
             content = fh.read()
-        _warn(f".env copiado al worktree {wt}: es configuracion local, git lo ignora; Kaplan lo lista al cerrar")
+        _warn(f".env copiado al worktree {wt} (permisos 600, git lo ignora): declaralo para que Kaplan lo limpie")
+    elif os.path.isfile(env_src):
+        _warn("el .env del checkout NO se copio (puede tener secretos): usa --copy-env si el stack lo necesita")
+    has_name = any(ln.strip().startswith("COMPOSE_PROJECT_NAME=") for ln in content.splitlines())
     with open(env_dst, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(content + ("" if not content or content.endswith("\n") else "\n")
-                 + f"COMPOSE_PROJECT_NAME={project}\n")
+                 + ("" if has_name else f"COMPOSE_PROJECT_NAME={project}\n"))
+    try:
+        os.chmod(env_dst, 0o600)
+    except OSError:
+        pass
     ports = set()
     for f in found:
         with open(os.path.join(repo, f), encoding="utf-8", errors="replace") as fh:
@@ -358,7 +379,7 @@ def cmd_worktree(a):
     if not ok:
         fail(f"no se pudo crear el worktree: {err}", EXIT_BUSY)
     wt = os.path.normpath(wt)
-    compose = _prepare_compose(repo, wt)
+    compose = _prepare_compose(repo, wt, a.copy_env)
 
     def mutate(st):
         st.setdefault("worktrees", []).append({"repo": repo, "path": wt, "branch": branch, "why": a.why,
@@ -487,6 +508,7 @@ def build_parser():
     s = sub.add_parser("worktree"); s.add_argument("op"); s.add_argument("--repo", required=True)
     s.add_argument("--kind", choices=("feat", "fix"), default="feat"); s.add_argument("--branch")
     s.add_argument("--why", required=True, help="justificacion: por que esta operacion necesita worktree")
+    s.add_argument("--copy-env", action="store_true", help="copia el .env del checkout (secretos) al worktree")
     s.set_defaults(fn=cmd_worktree)
     s = sub.add_parser("show"); s.add_argument("op"); s.set_defaults(fn=cmd_show)
     s = sub.add_parser("list"); s.add_argument("--open", action="store_true"); s.set_defaults(fn=cmd_list)

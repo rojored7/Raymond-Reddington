@@ -21,12 +21,17 @@ for f in sorted(os.listdir(agents)):
             problems.append(f"{f}: frontmatter sin {k}")
     if fields.get("name") and fields["name"] + ".md" != f:
         problems.append(f"{f}: name={fields['name']} no coincide con el archivo")
-# cada rol tiene su agente y sus fases estan documentadas en red.md
+# cada rol tiene su agente y sus fases estan en la linea de fases de los briefs de red.md
+phase_line = next((ln for ln in red.splitlines() if "`phase` por rol" in ln), "")
+if not phase_line:
+    problems.append("red.md no tiene la linea '`phase` por rol'")
 for role, cfg in roles["roles"].items():
     if not os.path.isfile(os.path.join(agents, f"{role}.md")):
         problems.append(f"rol {role} sin agents/{role}.md")
+    entry = re.search(re.escape(role.capitalize()) + r" `([^`]*)`", phase_line)
+    documented = set(entry.group(1).split("|")) if entry else set()
     for phase in cfg.get("write_paths", {}):
-        if phase not in red:
+        if phase not in documented:
             problems.append(f"red.md no documenta la fase {phase} de {role}")
 # cada flujo esta en red.md y en baz.md
 for flow in roles.get("flows", {}):

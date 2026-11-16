@@ -133,12 +133,16 @@ assert_eq "el checkout principal queda en la rama de la operacion" "$(git -C "$B
 assert_contains "branch queda registrada en state.json" "$(cat "$P/.red/ops/$OP5/state.json")" "\"branches\""
 assert_eq "pedirla de nuevo devuelve la misma" "$(bash "$R" branch "$OP5" --repo "$B" --kind fix)" "$BR"
 git -C "$B" switch -q main
+bash "$R" branch "$OP5" --repo "$B" --kind fix >/dev/null
+assert_eq "pedirla con el checkout en otra rama vuelve a la de la operacion" "$(git -C "$B" branch --show-current)" "$BR"
+git -C "$B" switch -q main
 echo cambio > "$B/sucio.txt"; git -C "$B" add sucio.txt
 OP6="$(bash "$R" new rama-sucia)"
 bash "$R" branch "$OP6" --repo "$B" >/dev/null 2>&1; assert_eq "checkout con cambios sin commitear se rechaza" "$?" "4"
 assert_eq "el rechazo no cambia la rama" "$(git -C "$B" branch --show-current)" "main"
 git -C "$B" reset -q; rm -f "$B/sucio.txt"
-echo ".red/" >> "$B/.gitignore"
+printf 'node_modules' > "$B/.gitignore"; git -C "$B" add .gitignore; git -C "$B" -c user.email=t@t -c user.name=t commit -q -m gi
+printf '\n.red/\n' >> "$B/.gitignore"
 OP7="$(bash "$R" new rama-gitignore)"
 bash "$R" branch "$OP7" --repo "$B" >/dev/null 2>&1; assert_eq "el .gitignore que toca Red no cuenta como cambio ajeno" "$?" "0"
 git -C "$B" checkout -q -- . 2>/dev/null; git -C "$B" switch -q main 2>/dev/null
@@ -149,7 +153,15 @@ printf 'services:\n  api:\n    image: x\n    ports: ["8000:8000"]\n' > "$DC/dock
 printf '.env\n' > "$DC/.gitignore"; printf 'DB_PASS=local\n' > "$DC/.env"
 git -C "$DC" add docker-compose.yml .gitignore; git -C "$DC" -c user.email=t@t -c user.name=t commit -q -m i
 OP8="$(bash "$R" new compose-wt)"
-WD="$(bash "$R" worktree "$OP8" --repo "$DC" --why "experimento descartable" 2>"$T/wd.err")"
+WN="$(bash "$R" worktree "$OP8" --repo "$DC" --why "experimento descartable" 2>"$T/wn.err")"
+assert_not_contains "sin --copy-env no copia secretos" "$(cat "$WN/.env" 2>/dev/null)" "DB_PASS"
+assert_contains "sin --copy-env igual fija el proyecto compose" "$(cat "$WN/.env" 2>/dev/null)" "COMPOSE_PROJECT_NAME="
+assert_contains "sin --copy-env avisa que no copio el .env" "$(cat "$T/wn.err")" "--copy-env"
+git -C "$DC" worktree remove --force "$WN" 2>/dev/null
+OP8="$(bash "$R" new compose-wt-env)"
+echo "COMPOSE_PROJECT_NAME=propio" >> "$DC/.env"
+WD="$(bash "$R" worktree "$OP8" --repo "$DC" --why "experimento descartable" --copy-env 2>"$T/wd.err")"
+assert_eq "no duplica COMPOSE_PROJECT_NAME" "$(grep -c COMPOSE_PROJECT_NAME "$WD/.env")" "1"
 assert_contains "copia el .env al worktree" "$(cat "$WD/.env" 2>/dev/null)" "DB_PASS=local"
 assert_contains "fija un COMPOSE_PROJECT_NAME propio" "$(cat "$WD/.env" 2>/dev/null)" "COMPOSE_PROJECT_NAME="
 assert_contains "avisa la copia del .env" "$(cat "$T/wd.err")" ".env"
@@ -223,6 +235,8 @@ echo '{"estado":"COMPLETADO"}' > "$T/retro.json"
 bash "$R" retro "$TB" --done --report "$T/retro.json"
 assert_eq "retro --done la marca hecha" "$(json_get "$P/.red/ops/$TB/state.json" retro.estado)" "hecha"
 bash "$R" retro "$TB" --done --report "$T/no-existe.json" >/dev/null 2>&1; assert_eq "retro sin reporte existente falla" "$?" "2"
+bash "$R" close "$TB" --summary "cerrada otra vez" >/dev/null
+assert_eq "cerrar de nuevo no rearma una retro ya hecha" "$(json_get "$P/.red/ops/$TB/state.json" retro.estado)" "hecha"
 TS="$(bash "$R" new suelta)"
 assert_eq "sin --target la op es su propio target" "$(json_get "$P/.red/ops/$TS/state.json" target)" "$TS"
 assert_contains "una op suelta completa su target al cerrar" "$(bash "$R" close "$TS")" "COMPLETO"
