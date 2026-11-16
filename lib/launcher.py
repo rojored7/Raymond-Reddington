@@ -309,6 +309,8 @@ def execute(a, role, cfg, policy, path, prompt):
     sessions_dir = os.path.join(path, "sessions")
     os.makedirs(sessions_dir, exist_ok=True)
     idle_s, hard_s = limits(cfg)
+    if a.phase in cfg.get("invalidates_gate_phases", []):
+        flow_control.close_gate(path, f"{role} arranca una fase {a.phase} nueva: el plan puede cambiar")
     before = flow_control.snapshot(a.cwd)
     for attempt in (1, 2):
         cmd = build_cmd(role, cfg, policy, resume, remote=bool(a.destinations))

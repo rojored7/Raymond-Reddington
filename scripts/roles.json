@@ -81,6 +81,9 @@
       "requires_flow": true,
       "approval_phases": [
         "execute"
+      ],
+      "invalidates_gate_phases": [
+        "plan"
       ]
     },
     "dembe": {

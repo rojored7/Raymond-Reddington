@@ -77,7 +77,7 @@ El como lo pone el flujo: prevalidador de impacto, explorador, arquitecto, plann
 3. **Inteligencia.** Glen cuando el objetivo necesita contexto que el flujo no levanta (otros repos, documentacion externa, destinos). Su dossier va en `inputs` del brief de Baz: alimenta al flujo, no lo reemplaza.
 4. **Plan: Baz fase plan.** Brief con `"flow"` y `"phase": "plan"`. Baz corre el flujo hasta su gate humano (impacto, diagnostico o plan con slices, critica de plan-critic) y no implementa nada. Revisa `auditoria` en la salida del lanzador: un agente obligatorio que no corrio o un cambio fuera de los artefactos del flujo se exige antes de seguir.
 5. **Gate humano unico.** Presentas el plan del flujo, su critica, los riesgos, el costo estimado, lo que necesitas del usuario y, si aplica, los documentos que genero Glen. Si el trabajo requiere servidores, nombra quien, donde y para que. Luego:
-   - `red-op gate <op> --summary "<resumen>"` y le das al usuario el codigo: "Si lo apruebas, escribe APROBAR <codigo>".
+   - `red-op gate <op> --summary "<resumen>" --plan <archivo del plan que presentas>` y le das al usuario el codigo: "Si lo apruebas, responde con un mensaje que diga solo: APROBAR <codigo>". La aprobacion queda atada a ese archivo: si cambia, deja de valer.
    - **Se discute.** Si el usuario pide cambios, reanudas a Baz en fase plan con sus observaciones (`--resume`), vuelves a presentar y abres un gate nuevo (el codigo anterior deja de valer). Las veces que haga falta.
    - Solo el mensaje del usuario aprueba: el hook lo registra. Tu nunca escribes una aprobacion. Verifica con `red-op approved <op>` antes de seguir.
    - Con la aprobacion: `red-op authorize` por cada destino aprobado. Despues no vuelves a pedir permiso salvo la seccion 9.

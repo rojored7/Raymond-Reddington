@@ -11,7 +11,7 @@ ediciones hechas por el coordinador en vez de por los agentes del flujo.
 import hashlib
 import os
 
-from approval import is_approved
+from approval import invalidate, is_approved
 from common import run
 from write_guard import matches
 
@@ -39,6 +39,11 @@ def approval_error(cfg, phase, op_path):
         return None
     return ("sin plan aprobado por el usuario no se ejecuta nada: falta la aprobacion del gate vigente "
             "(red-op gate, y el usuario responde APROBAR <codigo>)")
+
+
+def close_gate(op_path, reason):
+    """Un plan nuevo invalida la aprobacion anterior: hasta que el usuario apruebe el nuevo, no hay execute."""
+    return invalidate(op_path, reason)
 
 
 def required_agents(flow_cfg, phase):

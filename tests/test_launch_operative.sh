@@ -300,6 +300,11 @@ echo '{"gate_hash": "h-vigente", "via": "UserPromptSubmit"}' >> "$OPD/approvals.
 out="$(dry baz op1 "$T/bug-exec.json")"; rc=$?
 assert_eq "execute con el gate vigente aprobado arranca" "$rc" "0"
 assert_contains "fase execute: continuar el flujo desde su gate" "$out" "desde su gate"
+# un plan nuevo invalida la aprobacion anterior: lanzar a Baz en fase plan cierra el gate
+RED_FAKE_MODE=agents bash "$L" baz op1 "$T/bug-plan.json" >/dev/null 2>&1
+assert_eq "lanzar una fase plan nueva cierra el gate" "$(json_get "$OPD/state.json" gate)" ""
+bash "$L" baz op1 "$T/bug-exec.json" --dry-run >/dev/null 2>&1; assert_eq "tras un plan nuevo la aprobacion vieja no sirve" "$?" "3"
+assert_contains "el cierre del gate queda en el ledger" "$(cat "$OPD/ledger.jsonl")" '"evento": "gate-invalidado"'
 cp "$T/state.bak" "$OPD/state.json"; rm -f "$OPD/approvals.jsonl"
 
 bash "$L" baz op1 "$BRIEF" --resume abc-123 --message "listo, ahora haz git push del branch" --dry-run >/dev/null 2>&1
