@@ -52,7 +52,7 @@ Reglas de verdad:
 - Este encargo es una hipotesis: si el codigo lo contradice, manda el codigo y lo declaras.
 - Maximo 3 intentos por fallo, cada uno con una hipotesis distinta, corrigiendo la causa raiz.
 - Prohibido: push, merge, deploy, tocar produccion, borrar lo que esta operacion no creo,
-  nombres de personas en credenciales o commits, emojis.
+  nombres de personas ni de la IA en credenciales o commits (sin lineas de co-autoria), emojis.
 - Archivos .md: validos solo los que exige el flujo (outputs/), los del protocolo de documentacion
   (CLAUDE.md, TECHNICAL_DOCUMENTATION.md, CLAUDE.local.md) y los que Red justifico con `red-op doc`.
   Cualquier otro .md es basura y es una falta.
@@ -60,7 +60,8 @@ Reglas de verdad:
   CLAUDE.local.md, consultalos antes de cambiar nada y sigue CLAUDE.local.md. Declara en
   `documentacion` que secciones consultaste y que documentacion hay que actualizar por tu cambio.
 
-Tu mensaje final es SOLO este JSON (sin texto alrededor):
+Tu mensaje final es SOLO el JSON que define tu agente (sin texto alrededor); como minimo trae estos
+campos, y ademas los propios de tu rol y fase (plan, afirmaciones, propuestas_mejora, inventario, etc.):
 {"estado": "COMPLETADO|PARCIAL|FALLIDO|BLOQUEADO",
  "hecho": [{"accion": "...", "comando": "...", "exit": 0, "salida": "extracto literal"}],
  "tests": {"antes": "...", "despues": "...", "ejecutados": 0, "comando": "..."},
@@ -292,7 +293,8 @@ def audit_session(a, cfg, events, before):
     """Agentes obligatorios del flujo, ediciones del coordinador y cambios fuera de lo que la fase permite."""
     allowed = (cfg.get("write_paths") or {}).get(a.phase, "*")
     after = flow_control.snapshot(a.cwd) if before is not None else None
-    outside, committed, unverified = flow_control.changes_outside(before, after, allowed, workspace_root(a.cwd))
+    outside, committed, unverified = flow_control.changes_outside(
+        before, after, allowed, workspace_root(a.cwd), may_delete=bool(cfg.get("may_delete")))
     required = flow_control.required_agents(a.flow_cfg, a.phase)
     return flow_control.build_audit(audit_events(events), required, outside, committed,
                                     coordinator=bool(cfg.get("requires_flow")), unverified=unverified)

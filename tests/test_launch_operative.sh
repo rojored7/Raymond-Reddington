@@ -31,6 +31,8 @@ assert_not_contains "ya no prohibe todo .md" "$out" "archivos .md no pedidos"
 assert_contains "el contrato define que .md son validos" "$out" "red-op doc"
 assert_contains "el contrato pide consultar el protocolo de documentacion" "$out" "TECHNICAL_DOCUMENTATION.md"
 assert_contains "el reporte trae el campo documentacion" "$out" '"documentacion"'
+assert_contains "el contrato respeta el esquema de reporte propio del agente" "$out" "el JSON que define tu agente"
+assert_contains "el contrato prohibe nombres de la IA en commits" "$out" "ni de la IA"
 assert_contains "bloqueo comun: git push" "$out" 'Bash(git push:*)'
 assert_contains "bloqueo comun: --no-verify" "$out" 'no-verify'
 assert_contains "bloqueo comun: PowerShell" "$out" '"PowerShell"'
@@ -404,6 +406,17 @@ EOF
 assert_contains "fase sin restriccion: los cambios se declaran N/A, no limpios" "$check" "N/A"
 assert_not_contains "fase sin restriccion: commits no se reporta como false" "$check" "| False |"
 assert_contains "fase sin restriccion: no evaluado no baja ok" "$check" "| True"
+check="$("$PY" - "$ROOT/lib" <<'EOF'
+import sys
+sys.path.insert(0, sys.argv[1])
+import flow_control
+before = {"head": "a", "root": ".", "files": {".coverage": "h1"}}
+after = {"head": "a", "root": ".", "files": {".coverage": "ausente", "nuevo.txt": "h2"}}
+print(flow_control.changes_outside(before, after, [], ".", may_delete=True)[0],
+      flow_control.changes_outside(before, after, [], ".")[0])
+EOF
+)"
+assert_eq "kaplan: borrar no es cambio fuera de fase, crear si" "$check" "['nuevo.txt'] ['.coverage', 'nuevo.txt']"
 cp "$T/state.bak" "$OPD/state.json"
 
 # --- entorno invalido y claude ausente: codigos documentados, sin traceback ---

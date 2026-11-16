@@ -118,7 +118,8 @@
       ],
       "write_paths": {
         "cleanup": []
-      }
+      },
+      "may_delete": true
     },
     "zeng": {
       "model": "haiku",

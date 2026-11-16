@@ -117,7 +117,7 @@ def _committed_paths(before, after):
     return [p for p in out.split("\x00") if p] if ok else ["(no se pudo listar lo commiteado)"]
 
 
-def changes_outside(before, after, allowed, root):
+def changes_outside(before, after, allowed, root, may_delete=False):
     """(rutas fuera de lo permitido, hubo commits, sin_verificar) entre dos snapshots.
 
     Una fase sin restriccion ("*") no se evalua: devuelve N/A, nunca un 'limpio' que no se miro."""
@@ -128,7 +128,8 @@ def changes_outside(before, after, allowed, root):
     if after is None or "error" in before or "error" in after:
         return [], False, True
     paths = {p for p in set(before["files"]) | set(after["files"])
-             if before["files"].get(p) != after["files"].get(p)}
+             if before["files"].get(p) != after["files"].get(p)
+             and not (may_delete and after["files"].get(p) == "ausente")}  # borrar es el oficio de Kaplan
     committed = before["head"] != after["head"]
     if committed:
         paths |= set(_committed_paths(before, after))
