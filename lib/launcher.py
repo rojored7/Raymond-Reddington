@@ -285,10 +285,10 @@ def audit_session(a, cfg, events, before):
     """Agentes obligatorios del flujo, ediciones del coordinador y cambios fuera de lo que la fase permite."""
     allowed = (cfg.get("write_paths") or {}).get(a.phase, "*")
     after = flow_control.snapshot(a.cwd) if before is not None else None
-    outside, committed = flow_control.changes_outside(before, after, allowed, workspace_root(a.cwd))
+    outside, committed, unverified = flow_control.changes_outside(before, after, allowed, workspace_root(a.cwd))
     required = flow_control.required_agents(a.flow_cfg, a.phase)
     return flow_control.build_audit(audit_events(events), required, outside, committed,
-                                    coordinator=bool(cfg.get("requires_flow")))
+                                    coordinator=bool(cfg.get("requires_flow")), unverified=unverified)
 
 
 def ledger_audit(path, role, task, audit):
@@ -296,6 +296,8 @@ def ledger_audit(path, role, task, audit):
         ledger(path, "agentes-faltantes", agent=role, task=task, nota=", ".join(audit["agentes_faltantes"]))
     if audit["ediciones_directas"]:
         ledger(path, "edicion-directa", agent=role, task=task, nota=", ".join(audit["ediciones_directas"]))
+    if audit["sin_verificar"]:
+        ledger(path, "auditoria-sin-verificar", agent=role, task=task, nota="git status fallo: cambios sin auditar")
     if audit["cambios_fuera_de_fase"] or audit["commits_en_fase"]:
         nota = ", ".join(audit["cambios_fuera_de_fase"]) + (" (+commits)" if audit["commits_en_fase"] else "")
         ledger(path, "cambios-fuera-de-fase", agent=role, task=task, nota=nota)

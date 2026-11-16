@@ -349,6 +349,22 @@ out="$(RED_FAKE_MODE=dirty bash "$L" baz op1 "$T/bug-plan.json" --cwd "$G2" 2>&1
 assert_contains "fase plan: un cambio de codigo queda marcado" "$(aud cambios_fuera_de_fase)" "app.py"
 assert_not_contains "fase plan: los artefactos del flujo no cuentan" "$(aud cambios_fuera_de_fase)" "outputs"
 assert_contains "el cambio fuera de fase queda en el ledger" "$(cat "$OPD/ledger.jsonl")" '"evento": "cambios-fuera-de-fase"'
+echo "# ya sucio antes de la sesion" >> "$G2/app.py"
+out="$(RED_FAKE_MODE=dirty bash "$L" baz op1 "$T/bug-plan.json" --cwd "$G2" 2>&1)"
+assert_contains "un archivo ya sucio que se vuelve a editar se detecta" "$(aud cambios_fuera_de_fase)" "app.py"
+git -C "$G2" checkout -q -- app.py; rm -rf "$G2/outputs"
+check="$("$PY" - "$ROOT/lib" <<'EOF'
+import sys
+sys.path.insert(0, sys.argv[1])
+import flow_control
+before = {"head": "a", "files": {}}
+broken = {"error": "git status fallo"}
+out, committed, unverified = flow_control.changes_outside(before, broken, ["outputs/**"], ".")
+audit = flow_control.build_audit({"agentes_lanzados": [], "ediciones_directas": []}, [], out, committed, False, unverified)
+print(unverified, audit["ok"], audit["sin_verificar"])
+EOF
+)"
+assert_eq "si git status falla la auditoria queda sin verificar y no ok" "$check" "True False True"
 cp "$T/state.bak" "$OPD/state.json"
 
 # --- timeout duro solo si se pide explicitamente (S7) ---

@@ -8,6 +8,7 @@ Baz no ejecuta: coordina un flujo (/flow-bugfix, /flow-update, /flow-new-project
 En ambas fases el lanzador audita el stream: agentes obligatorios del flujo que no corrieron y
 ediciones hechas por el coordinador en vez de por los agentes del flujo.
 """
+import hashlib
 import os
 
 from approval import is_approved
@@ -62,29 +63,73 @@ def flow_prompt(flow_name, flow_cfg, phase):
             f"el final sin pausas, con todos sus gates automaticos. {common}"]
 
 
+GIT = ["git", "-c", "core.quotepath=false"]
+
+
+def _status_paths(text):
+    """Rutas de `git status --porcelain=v1 -z` (incluye el origen de renames y copias)."""
+    tokens, paths, i = text.split("\x00"), [], 0
+    while i < len(tokens):
+        entry = tokens[i]
+        i += 1
+        if len(entry) < 4:
+            continue
+        paths.append(entry[3:])
+        if entry[0] in "RC" or entry[1] in "RC":
+            paths.append(tokens[i])
+            i += 1
+    return paths
+
+
+def _content_hash(root, rel):
+    try:
+        with open(os.path.join(root, rel), "rb") as fh:
+            return hashlib.sha256(fh.read()).hexdigest()
+    except OSError:
+        return "ausente"
+
+
 def snapshot(cwd):
-    """(HEAD, lineas de git status) o None si cwd no esta en git."""
-    ok, head, _ = run(["git", "-C", cwd, "rev-parse", "HEAD"], timeout=10)
+    """{"head", "root", "files": {ruta: hash de contenido}} de lo que git ve cambiado; None si no hay git;
+    {"error"} si git status falla (la auditoria no puede verificar y lo dice)."""
+    ok, head, _ = run(GIT + ["-C", cwd, "rev-parse", "HEAD"], timeout=10)
     if not ok:
         return None
-    status = run(["git", "-C", cwd, "status", "--porcelain", "--untracked-files=all"], timeout=30)[1]
-    return head.strip(), {ln for ln in status.splitlines() if ln.strip()}
+    root = run(GIT + ["-C", cwd, "rev-parse", "--show-toplevel"], timeout=10)[1].strip() or cwd
+    ok, status, err = run(GIT + ["-C", root, "status", "--porcelain=v1", "-z", "--untracked-files=all"],
+                          timeout=120)
+    if not ok:
+        return {"error": f"git status fallo: {err}"}
+    files = {p: _content_hash(root, p) for p in _status_paths(status)}
+    return {"head": head.strip(), "root": root, "files": files}
+
+
+def _committed_paths(before, after):
+    ok, out, _ = run(GIT + ["-C", after["root"], "diff", "--name-only", "-z", before["head"], after["head"]],
+                     timeout=60)
+    return [p for p in out.split("\x00") if p] if ok else ["(no se pudo listar lo commiteado)"]
 
 
 def changes_outside(before, after, allowed, root):
-    """Rutas cambiadas durante la sesion que no estan en los patrones permitidos de la fase."""
-    if before is None or after is None or allowed == "*":
-        return [], False
-    paths = sorted({ln[3:].strip().strip('"') for ln in after[1] - before[1]})
-    outside = [p for p in paths if not any(matches(os.path.join(root, p), pat, root) for pat in allowed)]
-    return outside, before[0] != after[0]
+    """(rutas fuera de lo permitido, hubo commits, sin_verificar) entre dos snapshots."""
+    if allowed == "*" or before is None:
+        return [], False, False
+    if after is None or "error" in before or "error" in after:
+        return [], False, True
+    paths = {p for p in set(before["files"]) | set(after["files"])
+             if before["files"].get(p) != after["files"].get(p)}
+    committed = before["head"] != after["head"]
+    if committed:
+        paths |= set(_committed_paths(before, after))
+    outside = sorted(p for p in paths if not any(matches(os.path.join(root, p), pat, root) for pat in allowed))
+    return outside, committed, False
 
 
-def build_audit(stream_audit, required, outside, committed, coordinator):
+def build_audit(stream_audit, required, outside, committed, coordinator, unverified=False):
     """coordinator: el rol coordina un flujo (Baz) y no debe editar; para los demas manda write_paths."""
     launched = stream_audit["agentes_lanzados"]
     missing = [a for a in required if a not in launched]
     direct = stream_audit["ediciones_directas"] if coordinator else []
     return {"agentes_requeridos": required, "agentes_lanzados": launched, "agentes_faltantes": missing,
             "ediciones_directas": direct, "cambios_fuera_de_fase": outside, "commits_en_fase": committed,
-            "ok": not (missing or direct or outside or committed)}
+            "sin_verificar": unverified, "ok": not (missing or direct or outside or committed or unverified)}
