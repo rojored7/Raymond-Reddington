@@ -27,7 +27,8 @@ ls "$C"/red/backups/*/settings.json >/dev/null 2>&1 && pass "respalda settings.j
 [ -s "$C/red/VERSION" ] && pass "escribe la version instalada (VERSION)" || fail "escribe la version instalada (VERSION)"
 for f in CLAUDE.local.md prompt-init.md prompt-techdoc.md; do [ -f "$C/red/templates/protocol/$f" ] && pass "instala plantilla $f" || fail "instala plantilla $f"; done
 s="$(cat "$C/settings.json")"
-assert_eq "no impone agent red global" "$(json_get "$C/settings.json" agent)" ""
+assert_eq "Red queda como agente por defecto" "$(json_get "$C/settings.json" agent)" "red"
+assert_eq "settings.json fija RED_ROLE=red para los hooks de Red" "$(json_get "$C/settings.json" env.RED_ROLE)" "red"
 [ -f "$C/red/scripts/red.sh" ] && pass "instala el lanzador red.sh" || fail "instala el lanzador red.sh"
 [ -f "$C/red/scripts/red.cmd" ] && pass "instala el lanzador red.cmd" || fail "instala el lanzador red.cmd"
 assert_contains "red.sh fija RED_ROLE=red" "$(cat "$C/red/scripts/red.sh")" "RED_ROLE=red"
@@ -60,19 +61,16 @@ assert_contains "reinstalar no pisa las lecciones" "$(cat "$C/red/lecciones-apre
 n="$(grep -o 'red-stop-guard.sh' "$C/settings.json" | wc -l | tr -d ' ')"
 assert_eq "reinstalar no duplica hooks" "$n" "1"
 
-# Actualizacion desde la version que imponia agent=red: se restaura el agente previo del usuario
-"$PY" - "$C/settings.json" "$C/red/install-manifest.json" <<'PYEOF'
-import json, sys
-s, m = sys.argv[1], sys.argv[2]
-d = json.load(open(s)); d["agent"] = "red"; json.dump(d, open(s, "w"))
-d = json.load(open(m)); d["settings_agent_prev"] = {"present": True, "value": "mio"}; json.dump(d, open(m, "w"))
-PYEOF
-bash "$I" install >/dev/null 2>&1
-assert_eq "actualizar restaura el agente previo del usuario" "$(json_get "$C/settings.json" agent)" "mio"
-"$PY" -c "import json,sys;p=sys.argv[1];d=json.load(open(p));d['agent']='red';json.dump(d,open(p,'w'))" "$C/settings.json"
+# check avisa si Red dejo de ser el agente por defecto o falta RED_ROLE, y reinstalar lo repara
+"$PY" -c "import json,sys;p=sys.argv[1];d=json.load(open(p));d['agent']='otro';json.dump(d,open(p,'w'))" "$C/settings.json"
 out="$(bash "$I" --check 2>&1)"
-assert_contains "check avisa si agent=red quedo global" "$out" "agent=red global"
-"$PY" -c "import json,sys;p=sys.argv[1];d=json.load(open(p));d.pop('agent');json.dump(d,open(p,'w'))" "$C/settings.json"
+assert_contains "check avisa si Red no es el agente por defecto" "$out" "Red no es el agente por defecto"
+"$PY" -c "import json,sys;p=sys.argv[1];d=json.load(open(p));d['agent']='red';d['env'].pop('RED_ROLE');json.dump(d,open(p,'w'))" "$C/settings.json"
+out="$(bash "$I" --check 2>&1)"
+assert_contains "check avisa si falta RED_ROLE=red" "$out" "RED_ROLE"
+bash "$I" install >/dev/null 2>&1
+assert_eq "reinstalar repone RED_ROLE" "$(json_get "$C/settings.json" env.RED_ROLE)" "red"
+assert_eq "reinstalar conserva el env del usuario" "$(json_get "$C/settings.json" env.X)" "1"
 
 out="$(bash "$I" --check 2>&1)"; assert_eq "check sin diferencias termina en 0" "$?" "0"
 assert_contains "check corre los self-test de los hooks" "$out" "self-test"
@@ -100,6 +98,8 @@ bash "$I" uninstall >/dev/null 2>&1; assert_eq "uninstall termina en 0" "$?" "0"
 [ ! -d "$C/red/templates/protocol" ] && pass "quita las plantillas del protocolo" || fail "quita las plantillas del protocolo"
 assert_contains "restaura el borrador previo de red" "$(cat "$C/agents/red.md" 2>/dev/null)" "borrador viejo"
 assert_eq "quita agent de settings.json" "$(json_get "$C/settings.json" agent)" ""
+assert_eq "quita RED_ROLE de settings.json" "$(json_get "$C/settings.json" env.RED_ROLE)" ""
+assert_eq "uninstall conserva el env del usuario" "$(json_get "$C/settings.json" env.X)" "1"
 assert_contains "conserva el hook del usuario en una entrada compartida" "$(cat "$C/settings.json")" "mio-en-la-misma-entrada"
 assert_not_contains "no deja hooks de red-system" "$(cat "$C/settings.json")" "/red/hooks/"
 assert_contains "conserva los datos de reputacion" "$(cat "$C/red/reputation.json")" "test-writing"
@@ -109,6 +109,14 @@ bash "$I" uninstall >/dev/null 2>&1; assert_eq "uninstall repetido no falla" "$?
 cp "$T/settings.orig" "$C/settings.json"
 bash "$I" install >/dev/null 2>&1 && bash "$I" uninstall >/dev/null 2>&1
 assert_eq "settings.json queda como antes" "$(same_json "$C/settings.json" "$T/settings.orig")" "True"
+
+# agente previo del usuario: install lo guarda y uninstall lo devuelve
+"$PY" -c "import json,sys;p=sys.argv[1];d=json.load(open(p));d['agent']='mio';json.dump(d,open(p,'w'))" "$C/settings.json"
+bash "$I" install >/dev/null 2>&1
+assert_eq "install pone red aunque el usuario tuviera otro agente" "$(json_get "$C/settings.json" agent)" "red"
+bash "$I" uninstall >/dev/null 2>&1
+assert_eq "uninstall devuelve el agente previo del usuario" "$(json_get "$C/settings.json" agent)" "mio"
+cp "$T/settings.orig" "$C/settings.json"
 
 # S2b: si el usuario cambio su agente despues de instalar, uninstall no lo pisa
 bash "$I" install >/dev/null 2>&1

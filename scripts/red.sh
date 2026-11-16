@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Abre una sesion interactiva de Red. Red es opcional: las sesiones normales de Claude Code no cambian.
-# RED_ROLE=red activa el hook Stop de Red solo en esta sesion.
+# Atajo explicito a una sesion de Red. Tras instalar, Red ya es el agente por defecto de `claude`;
+# este atajo sirve igual si el agente por defecto se cambia. RED_ROLE=red activa los hooks de Red.
 export RED_ROLE=red
 exec claude --agent red "$@"

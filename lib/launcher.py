@@ -167,11 +167,23 @@ def preflight_guard():
     return None
 
 
-def guard_settings():
-    """Hook de escritura inyectado en cada teniente: no depende de la instalacion global."""
+def session_env(role, phase, op, path):
+    """Identidad del teniente para sus hooks (RED_ROLE, RED_PHASE, RED_OP, RED_OP_DIR)."""
+    return {"RED_ROLE": role, "RED_PHASE": phase, "RED_OP": op, "RED_OP_DIR": path}
+
+
+def guard_settings(env=None):
+    """Hook de escritura inyectado en cada teniente: no depende de la instalacion global.
+
+    El env viaja tambien aqui: el settings.json del usuario fija RED_ROLE=red (Red es el agente por
+    defecto) y el env de settings pisa el del proceso; --settings gana sobre settings.json.
+    """
     hook = guard_hook()
-    return json.dumps({"hooks": {"PreToolUse": [{"matcher": "Edit|Write|MultiEdit|NotebookEdit",
-                                                 "hooks": [{"type": "command", "command": f'bash "{hook}"'}]}]}})
+    settings = {"hooks": {"PreToolUse": [{"matcher": "Edit|Write|MultiEdit|NotebookEdit",
+                                          "hooks": [{"type": "command", "command": f'bash "{hook}"'}]}]}}
+    if env:
+        settings["env"] = dict(env)
+    return json.dumps(settings)
 
 
 def render_prompt(role, op, brief, destinations, cwd, phase, flow_lines=()):
@@ -200,10 +212,10 @@ def render_prompt(role, op, brief, destinations, cwd, phase, flow_lines=()):
     return "\n".join(lines) + "\n" + REPORT_CONTRACT
 
 
-def build_cmd(role, cfg, policy, resume, remote=False):
+def build_cmd(role, cfg, policy, resume, remote=False, env=None):
     cmd = ["claude", "-p", "--agent", role, "--model", cfg["model"],
            "--permission-mode", cfg.get("permission_mode", "auto"),
-           "--output-format", "stream-json", "--verbose", "--settings", guard_settings()]
+           "--output-format", "stream-json", "--verbose", "--settings", guard_settings(env)]
     if resume:
         cmd += ["--resume", resume]
     if cfg.get("allowed"):
@@ -380,7 +392,8 @@ def ensure_baseline(path, cwd):
 
 
 def execute(a, role, cfg, policy, path, prompt):
-    env = dict(os.environ, RED_ROLE=role, RED_PHASE=a.phase, RED_OP=a.op, RED_OP_DIR=path)
+    role_env = session_env(role, a.phase, a.op, path)
+    env = dict(os.environ, **role_env)
     os.makedirs(os.path.join(path, "sessions"), exist_ok=True)
     idle_s, hard_s = a.limits
     if a.phase not in cfg.get("requires_baseline_phases", []):
@@ -390,7 +403,7 @@ def execute(a, role, cfg, policy, path, prompt):
     before = flow_control.snapshot(a.cwd)
     resume, message, record_file = a.resume, prompt, None
     for attempt in (1, 2):
-        cmd = build_cmd(role, cfg, policy, resume, remote=bool(a.destinations))
+        cmd = build_cmd(role, cfg, policy, resume, remote=bool(a.destinations), env=role_env)
         ledger(path, "lanzado", agent=role, task=a.task, nota=f"intento {attempt} cwd={a.cwd}", resume=resume)
         try:
             code, summary, events, raw, err = run_stream(resolve_claude() + cmd[1:], message, env, a.cwd,
@@ -501,7 +514,8 @@ def main():
         cfg, path, prompt = prepare(a, policy)
         if a.dry_run:
             register(path, a.role, None)
-            cmd = build_cmd(a.role, cfg, policy, a.resume, remote=bool(a.destinations))
+            cmd = build_cmd(a.role, cfg, policy, a.resume, remote=bool(a.destinations),
+                            env=session_env(a.role, a.phase, a.op, path))
             print(json.dumps({"cmd": cmd, "cwd": a.cwd}, ensure_ascii=False))
             print(prompt)
             return

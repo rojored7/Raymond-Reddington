@@ -28,6 +28,13 @@ assert_not_contains "sin tope de presupuesto por sesion" "$out" 'max-budget-usd'
 assert_contains "dembe sigue sin NotebookEdit" "$out" '"NotebookEdit"'
 assert_contains "inyecta el guard de escritura con --settings" "$out" '"--settings"'
 assert_contains "el guard inyectado es red-write-guard" "$out" 'red-write-guard.sh'
+# Red es el agente por defecto y settings.json trae env RED_ROLE=red, que pisa el env del proceso:
+# el rol del teniente debe viajar en --settings (gana sobre settings.json) o su guard queda apagado.
+settings_arg="$(printf '%s\n' "$out" | head -1 | "$PY" -c "import json,sys;c=json.loads(sys.stdin.readline())['cmd'];print(c[c.index('--settings')+1])")"
+assert_eq "--settings fija RED_ROLE del teniente" "$(printf '%s' "$settings_arg" | "$PY" -c "import json,sys;print(json.load(sys.stdin)['env']['RED_ROLE'])")" "dembe"
+assert_eq "--settings fija RED_PHASE" "$(printf '%s' "$settings_arg" | "$PY" -c "import json,sys;print(json.load(sys.stdin)['env']['RED_PHASE'])")" "verify"
+assert_eq "--settings fija RED_OP" "$(printf '%s' "$settings_arg" | "$PY" -c "import json,sys;print(json.load(sys.stdin)['env']['RED_OP'])")" "op1"
+assert_contains "--settings fija RED_OP_DIR" "$(printf '%s' "$settings_arg" | "$PY" -c "import json,sys;print(json.load(sys.stdin)['env']['RED_OP_DIR'])")" "op1"
 assert_contains "el prompt declara la fase por defecto" "$out" 'Fase: verify'
 assert_not_contains "ya no prohibe todo .md" "$out" "archivos .md no pedidos"
 assert_contains "el contrato define que .md son validos" "$out" "red-op doc"

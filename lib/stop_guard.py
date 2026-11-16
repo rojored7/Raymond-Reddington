@@ -1,7 +1,7 @@
 """Hook Stop: impide que Red corte una operacion con trabajo pendiente.
 
-- Solo aplica a la sesion de Red (RED_ROLE=red, lo fija scripts/red.sh). Las sesiones normales de
-  Claude Code y los tenientes nunca se bloquean.
+- Solo aplica a la sesion de Red (RED_ROLE=red: lo fija settings.json al instalar, o scripts/red.sh).
+  Los tenientes llevan su propio RED_ROLE en --settings y nunca se bloquean.
 - Deja terminar si una sesion de teniente sigue viva: su notificacion reanuda a Red.
 - Se aparta tras 3 intentos de parada sin progreso en tracker o estado.
 """
