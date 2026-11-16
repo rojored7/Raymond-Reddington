@@ -6,7 +6,9 @@ echo "test_launch_operative"
 
 T="$(make_tmp)"; P="$T/proj"; mkdir -p "$P"; cd "$P" || exit 1
 export RED_DATA_DIR="$T/data"
+export RED_DOCKER_BIN="$T/sin-docker"  # baseline rapido en tests: docker no disponible
 OPD="$P/.red/ops/op1"; mkdir -p "$OPD/sessions"; echo '{"op":"op1","status":"executing"}' > "$OPD/state.json"
+echo '{"taken_at": "antes de la operacion"}' > "$OPD/baseline.json"
 echo '{"session_id":"abc-123","role":"baz"}' > "$OPD/sessions/baz-0.json"
 BRIEF="$T/brief.json"
 cat > "$BRIEF" <<'EOF'
@@ -505,6 +507,18 @@ out="$(RED_FAKE_MODE=chatty RED_TIMEOUT_SECONDS=2 bash "$L" glen op1 "$BRIEF" 2>
 took=$(( $(date +%s) - start ))
 assert_eq "salida continua no evita el corte duro" "$rc" "5"
 [ "$took" -lt 15 ] && pass "el corte duro llega a tiempo con salida continua ($took s)" || fail "el corte duro llega a tiempo con salida continua" "$took s"
+
+# --- baseline: automatico al primer lanzamiento; Kaplan y Baz execute lo exigen ---
+OP2D="$P/.red/ops/op2"; mkdir -p "$OP2D"; echo '{"op":"op2","status":"executing"}' > "$OP2D/state.json"
+out="$(bash "$L" kaplan op2 "$BRIEF" --dry-run 2>&1)"; rc=$?
+assert_eq "kaplan sin baseline se rechaza" "$rc" "3"
+assert_contains "el rechazo explica que falta el baseline" "$out" "baseline"
+sed 's/"task":"t1"/"task":"t1","inputs":{"baseline":"NOT RUN - el usuario acepto limpiar sin baseline"}/' "$BRIEF" > "$T/sin-baseline.json"
+bash "$L" kaplan op2 "$T/sin-baseline.json" --dry-run >/dev/null 2>&1; assert_eq "kaplan con NOT RUN declarado arranca" "$?" "0"
+bash "$L" glen op2 "$BRIEF" >/dev/null 2>&1
+[ -s "$OP2D/baseline.json" ] && pass "el primer lanzamiento toma el baseline" || fail "el primer lanzamiento toma el baseline"
+assert_contains "el baseline queda en el ledger" "$(cat "$OP2D/ledger.jsonl")" '"evento": "baseline"'
+bash "$L" kaplan op2 "$BRIEF" --dry-run >/dev/null 2>&1; assert_eq "con baseline kaplan arranca" "$?" "0"
 
 # --- timeout duro solo si se pide explicitamente (S7) ---
 out="$(RED_FAKE_MODE=sleep RED_FAKE_SLEEP=20 RED_TIMEOUT_SECONDS=2 bash "$L" glen op1 "$BRIEF" 2>&1)"; rc=$?

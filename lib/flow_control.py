@@ -55,8 +55,9 @@ def flow_prompt(flow_name, flow_cfg, phase):
         return []
     required = ", ".join(required_agents(flow_cfg, phase)) or "los que nombre el flujo"
     common = (f"Lanza como subagentes reales los agentes que nombra el flujo (obligatorios en esta fase: "
-              f"{required}). Los de RedWork que no esten registrados se lanzan como general-purpose cargando "
-              f"~/.claude/redwork/agents/<nombre>.md, con {AGENT_TAG_HINT} al inicio de su description. "
+              f"{required}) con subagent_type: <nombre> (los de RedWork estan registrados). Solo si uno no "
+              f"lo estuviera: general-purpose con {AGENT_TAG_HINT} al inicio de su description y su definicion "
+              "de ~/.claude/redwork/agents/<nombre>.md cargada (Read del subagente o completa en el prompt). "
               "No edites codigo tu mismo: el lanzador audita que agentes corrieron y quien edito.")
     if phase == "plan":
         return [f"Flujo: {flow_cfg['command']}  (su gate: {flow_cfg.get('gate', '-')})",

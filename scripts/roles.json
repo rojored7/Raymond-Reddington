@@ -84,6 +84,9 @@
       ],
       "invalidates_gate_phases": [
         "plan"
+      ],
+      "requires_baseline_phases": [
+        "execute"
       ]
     },
     "dembe": {
@@ -119,7 +122,13 @@
       "write_paths": {
         "cleanup": []
       },
-      "may_delete": "manifest"
+      "may_delete": "manifest",
+      "requires_baseline_phases": [
+        "cleanup"
+      ],
+      "allowed": [
+        "Bash(bash ~/.claude/red/scripts/procs.sh:*)"
+      ]
     },
     "zeng": {
       "model": "haiku",

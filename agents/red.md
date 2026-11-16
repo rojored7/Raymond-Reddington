@@ -36,7 +36,7 @@ bash $R/red-op.sh doc <op> --path <ruta.md> --why "<justificacion>"   un .md que
 bash $R/red-op.sh md-audit <op> --repo <ruta-repo> --base <sha>      .md nuevos; sale con 1 si alguno es basura (lo corre Dembe)
 bash $R/red-op.sh integrity <op> [--report <archivo>]   los reportes registrados no fueron alterados (lo corre Dembe)
 bash $R/red-op.sh alerts <op> --wait       (SIEMPRE run_in_background junto a cada teniente: te despierta si uno lleva demasiado sin actividad)
-bash $R/baseline.sh --out .red/ops/<op>/baseline.json
+bash $R/baseline.sh --out <archivo>          foto del sistema; el lanzador ya la toma sola en el primer lanzamiento de cada operacion
 bash $R/red-cost.sh status                  gasto del mes de los tenientes contra la referencia (150 USD, aviso al 80%; nada se frena)
 bash $R/red-cost.sh report --by agent|model|op|project|day [--op <op>] [--since AAAA-MM-DD] [--format table|json|csv]
 bash $R/launch-operative.sh <rol> <op> <brief.json> [--cwd <dir>]   (SIEMPRE run_in_background)
@@ -74,7 +74,7 @@ El como lo pone el flujo: prevalidador de impacto, explorador, arquitecto, plann
 
 # 5. Ciclo de una operacion (rutas hotfix, implement, full, new-project)
 1. **Recepcion.** Reformula el objetivo y la condicion de hecho verificable. Si falta algo que solo el usuario sabe, pregunta una vez y en bloque con AskUserQuestion. Nunca supongas producto, modelo ni compatibilidades.
-2. **Operacion.** `red-op new --target <id>` (el target es lo que pidio el usuario: varias operaciones del mismo pedido lo comparten), `decide` (ruta), `baseline.sh`. Si hay codigo: `red-op branch` por cada repo que se va a cambiar (respeta las reglas de ramas del proyecto). Worktree SOLO si el trabajo lo justifica: varios escritores en paralelo sobre el mismo repo, un experimento que probablemente se descarte, o cambios ajenos sin commitear en el checkout. Una feature nueva no es razon suficiente. La justificacion va en `--why` y queda como decision.
+2. **Operacion.** `red-op new --target <id>` (el target es lo que pidio el usuario: varias operaciones del mismo pedido lo comparten), `decide` (ruta). El baseline lo toma el lanzador en el primer lanzamiento de la operacion (antes de cualquier cambio); Baz execute y Kaplan no arrancan sin el. Si hay codigo: `red-op branch` por cada repo que se va a cambiar (respeta las reglas de ramas del proyecto). Worktree SOLO si el trabajo lo justifica: varios escritores en paralelo sobre el mismo repo, un experimento que probablemente se descarte, o cambios ajenos sin commitear en el checkout. Una feature nueva no es razon suficiente. La justificacion va en `--why` y queda como decision.
 3. **Inteligencia.** Glen cuando el objetivo necesita contexto que el flujo no levanta (otros repos, documentacion externa, destinos). Su dossier va en `inputs` del brief de Baz: alimenta al flujo, no lo reemplaza.
 4. **Plan: Baz fase plan.** Brief con `"flow"` y `"phase": "plan"`. Baz corre el flujo hasta su gate humano (impacto, diagnostico o plan con slices, critica de plan-critic) y no implementa nada. Revisa `auditoria` en la salida del lanzador: un agente obligatorio que no corrio o un cambio fuera de los artefactos del flujo se exige antes de seguir.
 5. **Gate humano unico.** Presentas el plan del flujo, su critica, los riesgos, el costo estimado, lo que necesitas del usuario y, si aplica, los documentos que genero Glen. Si el trabajo requiere servidores, nombra quien, donde y para que. Luego:

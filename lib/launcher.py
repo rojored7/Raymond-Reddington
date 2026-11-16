@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import (CorruptJSON, append_jsonl, data_dir, file_lock, ledger, live_sessions,  # noqa: E402
                     now, op_dir, read_json, read_json_strict, redact, run, to_native, utf8_stdio,
                     write_json)
+import baseline  # noqa: E402
 from integrity import parse_report, report_hash  # noqa: E402
 from session_stream import StreamTimeout, audit_events, run_stream  # noqa: E402
 
@@ -353,10 +354,37 @@ def delivered(a, role, path, summary, audit, record_file):
             "result": summary["result"]}
 
 
+def baseline_error(cfg, phase, path, brief):
+    """Fases que dependen de la foto previa (Baz execute, Kaplan) no arrancan sin ella."""
+    if phase not in cfg.get("requires_baseline_phases", []):
+        return None
+    if os.path.isfile(os.path.join(path, "baseline.json")):
+        return None
+    declared = str(((brief or {}).get("inputs") or {}).get("baseline", ""))
+    if declared.startswith("NOT RUN -") and len(declared) > len("NOT RUN - "):
+        return None
+    return ("no hay baseline de la operacion (.red/ops/<op>/baseline.json): sin la foto previa no se puede "
+            "distinguir lo preexistente. Si el usuario acepta seguir sin ella, el brief declara "
+            "inputs.baseline = 'NOT RUN - <razon>'")
+
+
+def ensure_baseline(path, cwd):
+    """Toma la foto del sistema en el primer lanzamiento de la operacion, antes de cualquier cambio."""
+    target = os.path.join(path, "baseline.json")
+    if os.path.isfile(target):
+        return
+    snap = {"taken_at": now(), "cwd": cwd, "ports": baseline.listening_ports(), "processes": baseline.processes(),
+            "git": baseline.git_state(cwd), "docker": baseline.docker_state()}
+    write_json(target, snap)
+    ledger(path, "baseline", nota=f"foto previa tomada en {cwd}")
+
+
 def execute(a, role, cfg, policy, path, prompt):
     env = dict(os.environ, RED_ROLE=role, RED_PHASE=a.phase, RED_OP=a.op, RED_OP_DIR=path)
     os.makedirs(os.path.join(path, "sessions"), exist_ok=True)
     idle_s, hard_s = a.limits
+    if a.phase not in cfg.get("requires_baseline_phases", []):
+        ensure_baseline(path, a.cwd)
     if a.phase in cfg.get("invalidates_gate_phases", []):
         flow_control.close_gate(path, f"{role} arranca una fase {a.phase} nueva: el plan puede cambiar")
     before = flow_control.snapshot(a.cwd)
@@ -435,7 +463,7 @@ def check_rules(a, cfg, policy, brief, path):
         a.flow_name, a.flow_cfg = flow_control.flow_for(a.role, cfg, brief, policy)
     except ValueError as exc:
         raise Refused(EXIT_USAGE, str(exc)) from exc
-    denial = flow_control.approval_error(cfg, a.phase, path)
+    denial = flow_control.approval_error(cfg, a.phase, path) or baseline_error(cfg, a.phase, path, brief)
     if denial:
         raise Refused(EXIT_FORBIDDEN, denial)
     check_workspace(cfg, path, a.cwd)

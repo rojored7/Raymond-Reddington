@@ -29,5 +29,14 @@ cd "$T" || exit 1
 bash "$B" --out "$T/ng.json" >/dev/null 2>&1
 assert_eq "fuera de repo git marca ok=false" "$(json_get "$T/ng.json" git.ok)" "False"
 
+# --- procesos con linea de comandos (Kaplan verifica dependientes vivos) ---
+PROCS="$ROOT/scripts/procs.sh"
+out="$(bash "$PROCS" --pid $$ 2>&1)"
+check="$("$PY" -c "import json,sys;d=json.loads(sys.stdin.read());print(len(d)>=1 and all(k in d[0] for k in ('pid','ppid','name','cmdline')))" <<< "$out" 2>&1)"
+assert_eq "procs.sh lista pid, ppid, nombre y linea de comandos" "$check" "True"
+all="$(bash "$PROCS" 2>&1)"
+assert_eq "procs.sh sin filtro lista muchos procesos" "$("$PY" -c "import json,sys;print(len(json.loads(sys.stdin.read()))>5)" <<< "$all" 2>&1)" "True"
+assert_eq "el baseline guarda la linea de comandos de los procesos" "$("$PY" -c "import json,sys;d=json.load(open(sys.argv[1]));print(any('cmdline' in p for p in d['processes']['data']))" "$T/b.json" 2>&1)" "True"
+
 cd / && rm -rf "$T"
 finish

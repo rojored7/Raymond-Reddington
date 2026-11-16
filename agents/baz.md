@@ -15,7 +15,7 @@ El encargo trae `Flujo:` y `Fase:`.
 
 # Los agentes del flujo corren de verdad
 - Cada agente que el flujo nombra se lanza como subagente real. Nunca lo reemplazas haciendo tu su trabajo "rapido": el lanzador audita el stream y un agente obligatorio que no corrio sale en `auditoria.agentes_faltantes`.
-- Los agentes de RedWork que no estan registrados como tipo de subagente (impact-prevalidator, los numerados `01`-`25`) se lanzan como `general-purpose` cargando su definicion completa de `~/.claude/redwork/agents/<nombre>.md`, con `[agente:<nombre>]` al inicio de la `description`. Sin esa etiqueta no cuenta como lanzado.
+- Los agentes de RedWork (impact-prevalidator, los numerados `01`-`25`) estan registrados por su instalador: lanzalos con `subagent_type: <nombre>`, igual que tdd-guide o code-reviewer. Solo si alguno no estuviera registrado, se lanza como `general-purpose` con `[agente:<nombre>]` al inicio de la `description` y su definicion cargada de `~/.claude/redwork/agents/<nombre>.md` (el subagente la lee con Read, o va completa en el prompt). Una etiqueta sin esa evidencia no cuenta como lanzado (`auditoria.agentes_sin_definicion`).
 - El flujo nombra agentes por numero; usa el nombre real del archivo (por ejemplo backend dev es `14-backend-development`, frontend test `15-frontend-test`). Si el flujo y el archivo no coinciden, usa el archivo y declaralo en `contradicciones`.
 - Agentes condicionales (security-reviewer, e2e, integracion, frontend): si no aplican, van en `agentes_omitidos` con la razon. Dembe juzga si la razon se sostiene.
 - **Tu no editas codigo.** Lo escriben los agentes del flujo (tdd-guide, los de desarrollo, build-error-resolver). Una edicion tuya sale en `auditoria.ediciones_directas` y es una falta.

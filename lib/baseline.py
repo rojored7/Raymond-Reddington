@@ -4,8 +4,6 @@ Es la base de Kaplan: lo que esta en el baseline existia antes de la operacion y
 Cada fuente se reporta como {ok, data, error}; una fuente no disponible nunca rompe la foto.
 """
 import argparse
-import csv
-import io
 import json
 import os
 import re
@@ -13,6 +11,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import now, run, write_json  # noqa: E402
+from procs import list_processes  # noqa: E402
 
 
 def source(ok, data=None, error=None):
@@ -35,15 +34,9 @@ def listening_ports():
 
 
 def processes():
-    if os.name == "nt":
-        ok, out, err = run(["tasklist", "/FO", "CSV", "/NH"])
-        if not ok:
-            return source(False, error=err)
-        rows = [{"name": r[0], "pid": r[1]} for r in csv.reader(io.StringIO(out)) if len(r) > 1]
-        return source(True, rows)
-    ok, out, err = run(["ps", "-eo", "pid=,comm="])
-    rows = [dict(zip(("pid", "name"), line.split(None, 1))) for line in out.splitlines()] if ok else None
-    return source(ok, rows, err)
+    """Procesos con su linea de comandos: Kaplan distingue lo preexistente de lo que creo la operacion."""
+    rows, err = list_processes()
+    return source(rows is not None, rows, err)
 
 
 def git_state(cwd):
