@@ -10,7 +10,7 @@ OPD="$P/.red/ops/op1"; mkdir -p "$OPD/sessions"; echo '{"op":"op1","status":"exe
 echo '{"session_id":"abc-123","role":"baz"}' > "$OPD/sessions/baz-0.json"
 BRIEF="$T/brief.json"
 cat > "$BRIEF" <<'EOF'
-{"task":"t1","objective":"Crear funcion suma con su test","context":"repo local de prueba",
+{"task":"t1","flow":"flow-update","objective":"Crear funcion suma con su test","context":"repo local de prueba",
  "criteria":["existe test que falla primero","suma(2,3)==5"],"out_of_scope":["no hacer git push","no tocar prod"]}
 EOF
 
@@ -77,7 +77,7 @@ cat > "$OPD/authorizations.json" <<'EOF'
 {"destinations":[{"name":"qa-ejemplo","host":"10.0.0.21","roles":["baz"],"purpose":"x","approved_by":"usuario"},{"name":"qa-app","host":"10.9.9.21","roles":["baz","dembe"],"purpose":"desplegar y verificar","protect":["red_*"],"approved_by":"usuario"}]}
 EOF
 cat > "$T/qa.json" <<'EOF'
-{"task":"t6","objective":"desplegar la rama en QA y verificar health","criteria":["health 200"],"destinations":["qa-app"]}
+{"task":"t6","flow":"flow-update","objective":"desplegar la rama en QA y verificar health","criteria":["health 200"],"destinations":["qa-app"]}
 EOF
 out="$(dry baz op1 "$T/qa.json")"; rc=$?
 assert_eq "baz con destino autorizado arranca" "$rc" "0"
@@ -174,6 +174,19 @@ if mode == "multi":  # subagentes en segundo plano: varios result, el reporte es
     result('{"estado": "COMPLETADO", "hecho": [], "contradicciones": []}', 0.90)
     result("", 0.90)
     sys.exit(0)
+def tool(name, inp, parent=None):
+    emit({"type": "assistant", "parent_tool_use_id": parent,
+          "message": {"content": [{"type": "tool_use", "name": name, "input": inp}]}})
+if mode in ("agents", "skip"):
+    tool("Agent", {"subagent_type": "impact-prevalidator", "description": "impacto"})
+    if mode == "agents":
+        tool("Agent", {"subagent_type": "general-purpose", "description": "[agente:code-explorer] trazar el bug"})
+        tool("Edit", {"file_path": "sub.py"}, parent="toolu_sub")
+        tool("Edit", {"file_path": "app/x.py"})
+if mode == "dirty":
+    open("app.py", "a").write("# cambio en fase plan\n")
+    os.makedirs("outputs", exist_ok=True)
+    open(os.path.join("outputs", "00b.md"), "w").write("ok\n")
 if mode == "empty_once" and n == 1:
     result("")
 else:
@@ -252,6 +265,70 @@ out="$(RED_FAKE_MODE=quiet RED_FAKE_SLEEP=3 RED_INACTIVITY_SECONDS=1 bash "$L" g
 assert_eq "una sesion lenta no se mata por inactividad" "$rc" "0"
 assert_contains "registra la inactividad en el ledger" "$(cat "$OPD/ledger.jsonl")" '"evento": "inactivo"'
 assert_contains "deja la alerta para Red en alerts.jsonl" "$(cat "$OPD/alerts.jsonl" 2>/dev/null)" '"rol": "glen"'
+
+# --- Baz coordina flujos de RedWork en dos fases ---
+cat > "$T/bug-plan.json" <<'EOF'
+{"task":"b1","flow":"flow-bugfix","phase":"plan","objective":"parse_precio falla con $","criteria":["devuelve 1234.0"]}
+EOF
+sed 's/"flow":"flow-bugfix",//' "$T/bug-plan.json" > "$T/sin-flujo.json"
+bash "$L" baz op1 "$T/sin-flujo.json" --dry-run >/dev/null 2>&1; assert_eq "baz sin flujo se rechaza" "$?" "2"
+sed 's/flow-bugfix/flow-inventado/' "$T/bug-plan.json" > "$T/flujo-malo.json"
+bash "$L" baz op1 "$T/flujo-malo.json" --dry-run >/dev/null 2>&1; assert_eq "baz con flujo desconocido se rechaza" "$?" "2"
+out="$(dry baz op1 "$T/bug-plan.json")"
+assert_contains "fase plan: el prompt nombra el comando del flujo" "$out" "/flow-bugfix"
+assert_contains "fase plan: detenerse en el gate humano" "$out" "GATE HUMANO"
+assert_contains "fase plan: nombra los agentes obligatorios" "$out" "impact-prevalidator"
+assert_contains "fase plan: agentes de RedWork via general-purpose etiquetado" "$out" "[agente:"
+
+sed 's/"phase":"plan"/"phase":"execute"/' "$T/bug-plan.json" > "$T/bug-exec.json"
+bash "$L" baz op1 "$T/bug-exec.json" --dry-run >/dev/null 2>&1; assert_eq "execute sin gate se rechaza" "$?" "3"
+cp "$OPD/state.json" "$T/state.bak"
+"$PY" - "$OPD/state.json" <<'EOF'
+import json, sys
+p = sys.argv[1]; d = json.load(open(p)); d["gate"] = {"hash": "h-vigente"}; json.dump(d, open(p, "w"))
+EOF
+out="$(bash "$L" baz op1 "$T/bug-exec.json" --dry-run 2>&1)"; rc=$?
+assert_eq "execute con gate sin aprobar se rechaza" "$rc" "3"
+assert_contains "el rechazo dice que falta la aprobacion del usuario" "$out" "aprob"
+echo '{"gate_hash": "h-viejo", "via": "UserPromptSubmit"}' > "$OPD/approvals.jsonl"
+bash "$L" baz op1 "$T/bug-exec.json" --dry-run >/dev/null 2>&1; assert_eq "una aprobacion de otro gate no sirve" "$?" "3"
+echo '{"gate_hash": "h-vigente", "via": "UserPromptSubmit"}' >> "$OPD/approvals.jsonl"
+out="$(dry baz op1 "$T/bug-exec.json")"; rc=$?
+assert_eq "execute con el gate vigente aprobado arranca" "$rc" "0"
+assert_contains "fase execute: continuar el flujo desde su gate" "$out" "desde su gate"
+cp "$T/state.bak" "$OPD/state.json"; rm -f "$OPD/approvals.jsonl"
+
+bash "$L" baz op1 "$BRIEF" --resume abc-123 --message "listo, ahora haz git push del branch" --dry-run >/dev/null 2>&1
+assert_eq "un --message de resume con push se rechaza" "$?" "3"
+
+# --- auditoria del stream: agentes obligatorios y ediciones directas del coordinador ---
+out="$(RED_FAKE_MODE=agents bash "$L" baz op1 "$T/bug-plan.json" 2>&1)"
+aud() { "$PY" -c "import json,sys;print(json.loads(sys.stdin.read())['auditoria'][sys.argv[1]])" "$1" <<< "$out"; }
+assert_contains "registra agentes lanzados por subagent_type" "$(aud agentes_lanzados)" "impact-prevalidator"
+assert_contains "registra agentes de RedWork por su etiqueta" "$(aud agentes_lanzados)" "code-explorer"
+assert_eq "con todos los obligatorios no falta ninguno" "$(aud agentes_faltantes)" "[]"
+assert_contains "detecta la edicion directa del coordinador" "$(aud ediciones_directas)" "app/x.py"
+assert_not_contains "la edicion de un subagente no es directa" "$(aud ediciones_directas)" "sub.py"
+assert_contains "la edicion directa queda en el ledger" "$(cat "$OPD/ledger.jsonl")" '"evento": "edicion-directa"'
+out="$(RED_FAKE_MODE=skip bash "$L" baz op1 "$T/bug-plan.json" 2>&1)"
+assert_contains "detecta el agente obligatorio que no corrio" "$(aud agentes_faltantes)" "code-explorer"
+assert_eq "la auditoria marca la entrega" "$(aud ok)" "False"
+assert_contains "el faltante queda en el ledger" "$(cat "$OPD/ledger.jsonl")" '"evento": "agentes-faltantes"'
+
+# --- fase plan: nada fuera de los artefactos del flujo ---
+G2="$T/repos/plan"; mkdir -p "$G2"; git init -q -b main "$G2"; echo "x = 1" > "$G2/app.py"
+git -C "$G2" add app.py; git -C "$G2" -c user.email=t@t -c user.name=t commit -q -m i; git -C "$G2" switch -q -c fix/p
+G2N="$("$PY" -c "import os,sys;print(os.path.normpath(sys.argv[1]))" "$G2")"
+"$PY" - "$OPD/state.json" "$G2N" <<'EOF'
+import json, sys
+p, repo = sys.argv[1:]
+d = json.load(open(p)); d["branches"] = [{"repo": repo, "branch": "fix/p"}]; json.dump(d, open(p, "w"))
+EOF
+out="$(RED_FAKE_MODE=dirty bash "$L" baz op1 "$T/bug-plan.json" --cwd "$G2" 2>&1)"
+assert_contains "fase plan: un cambio de codigo queda marcado" "$(aud cambios_fuera_de_fase)" "app.py"
+assert_not_contains "fase plan: los artefactos del flujo no cuentan" "$(aud cambios_fuera_de_fase)" "outputs"
+assert_contains "el cambio fuera de fase queda en el ledger" "$(cat "$OPD/ledger.jsonl")" '"evento": "cambios-fuera-de-fase"'
+cp "$T/state.bak" "$OPD/state.json"
 
 # --- timeout duro solo si se pide explicitamente (S7) ---
 out="$(RED_FAKE_MODE=sleep RED_FAKE_SLEEP=20 RED_TIMEOUT_SECONDS=2 bash "$L" glen op1 "$BRIEF" 2>&1)"; rc=$?

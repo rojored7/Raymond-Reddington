@@ -77,7 +77,11 @@
           ".project-state/**"
         ],
         "execute": "*"
-      }
+      },
+      "requires_flow": true,
+      "approval_phases": [
+        "execute"
+      ]
     },
     "dembe": {
       "model": "opus",
@@ -129,6 +133,72 @@
       ],
       "write_paths": {
         "report": []
+      }
+    }
+  },
+  "flows": {
+    "flow-bugfix": {
+      "command": "/flow-bugfix",
+      "gate": "veredicto de impacto + causa raiz identificada",
+      "required": {
+        "plan": [
+          "impact-prevalidator",
+          "code-explorer"
+        ],
+        "execute": [
+          "tdd-guide",
+          "code-reviewer",
+          "20-linting-validator",
+          "19-smoke-test"
+        ]
+      }
+    },
+    "flow-update": {
+      "command": "/flow-update",
+      "gate": "veredicto de impacto + plan con slices + critica de plan-critic",
+      "required": {
+        "plan": [
+          "impact-prevalidator",
+          "code-explorer",
+          "code-architect",
+          "planner",
+          "plan-critic"
+        ],
+        "execute": [
+          "tdd-guide",
+          "code-reviewer",
+          "20-linting-validator",
+          "19-smoke-test"
+        ]
+      }
+    },
+    "flow-new-project": {
+      "command": "/flow-new-project",
+      "gate": "paquete de decisiones: impacto, dominio, arquitectura, sprint plan y critica de plan-critic",
+      "required": {
+        "plan": [
+          "impact-prevalidator",
+          "01-product-discovery",
+          "02-domain-modeling",
+          "03-context-mapping",
+          "04-architecture-decision",
+          "05-service-design",
+          "06-epic-generation",
+          "07-user-story-generation",
+          "08-tech-lead-delivery",
+          "09-sprint-orchestrator",
+          "plan-critic"
+        ],
+        "execute": [
+          "12-infrastructure-deployment",
+          "13-backend-test",
+          "14-backend-development",
+          "17-integration-test",
+          "18-e2e-test",
+          "19-smoke-test",
+          "20-linting-validator",
+          "21-security-review"
+        ]
       }
     }
   }

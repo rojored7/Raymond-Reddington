@@ -9,6 +9,7 @@ Por que streaming y no `--output-format json`:
 import json
 import os
 import queue
+import re
 import subprocess
 import threading
 import time
@@ -35,6 +36,35 @@ def summarize(events):
         if body:
             text = body
     return {"session_id": session_id, "result": text, "total_cost_usd": cost, "results": results}
+
+
+AGENT_TOOLS = ("Agent", "Task")
+WRITE_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
+AGENT_TAG = re.compile(r"\[agente:([\w.\-]+)\]")
+
+
+def audit_events(events):
+    """Que agentes se lanzaron (a cualquier nivel) y que archivos edito la sesion principal.
+
+    Un general-purpose que carga un agente de RedWork se identifica por su etiqueta [agente:<n>].
+    Una edicion con parent_tool_use_id es de un subagente; sin el, la hizo el coordinador.
+    """
+    launched, direct = set(), []
+    for ev in events:
+        if ev.get("type") != "assistant":
+            continue
+        top_level = ev.get("parent_tool_use_id") is None
+        for part in (ev.get("message") or {}).get("content") or []:
+            if not isinstance(part, dict) or part.get("type") != "tool_use":
+                continue
+            name, params = part.get("name"), part.get("input") or {}
+            if name in AGENT_TOOLS:
+                kind = params.get("subagent_type") or "general-purpose"
+                tag = AGENT_TAG.search(f"{params.get('description', '')} {str(params.get('prompt', ''))[:300]}")
+                launched.add(tag.group(1) if tag and kind == "general-purpose" else kind)
+            elif top_level and name in WRITE_TOOLS:
+                direct.append(params.get("file_path") or params.get("notebook_path") or "?")
+    return {"agentes_lanzados": sorted(launched), "ediciones_directas": direct}
 
 
 def parse_line(line):

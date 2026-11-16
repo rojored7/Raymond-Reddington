@@ -22,7 +22,9 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import (CorruptJSON, append_jsonl, data_dir, file_lock, ledger, live_sessions,  # noqa: E402
                     now, op_dir, read_json, read_json_strict, run, to_native, write_json)
-from session_stream import StreamTimeout, run_stream  # noqa: E402
+import flow_control  # noqa: E402
+from session_stream import StreamTimeout, audit_events, run_stream  # noqa: E402
+from write_guard import workspace_root  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EXIT_USAGE, EXIT_FORBIDDEN, EXIT_BUSY, EXIT_FAILED = 2, 3, 4, 5
@@ -145,9 +147,9 @@ def guard_settings():
                                                  "hooks": [{"type": "command", "command": f'bash "{hook}"'}]}]}})
 
 
-def render_prompt(role, op, brief, destinations, cwd, phase):
+def render_prompt(role, op, brief, destinations, cwd, phase, flow_lines=()):
     lines = [f"ENCARGO DE RED  operacion={op}  tarea={brief.get('task', '-')}  rol={role}",
-             f"Fase: {phase}",
+             f"Fase: {phase}", *flow_lines,
              f"Directorio de la operacion: {op_dir(op)}",
              f"Directorio de trabajo: {cwd}",
              f"Objetivo: {brief.get('objective', '')}",
@@ -256,33 +258,57 @@ def idle_reporter(path, role, task):
     return report
 
 
+def audit_session(a, cfg, events, before):
+    """Agentes obligatorios del flujo, ediciones del coordinador y cambios fuera de lo que la fase permite."""
+    allowed = (cfg.get("write_paths") or {}).get(a.phase, "*")
+    after = flow_control.snapshot(a.cwd) if before is not None else None
+    outside, committed = flow_control.changes_outside(before, after, allowed, workspace_root(a.cwd))
+    required = flow_control.required_agents(a.flow_cfg, a.phase)
+    return flow_control.build_audit(audit_events(events), required, outside, committed)
+
+
+def ledger_audit(path, role, task, audit):
+    if audit["agentes_faltantes"]:
+        ledger(path, "agentes-faltantes", agent=role, task=task, nota=", ".join(audit["agentes_faltantes"]))
+    if audit["ediciones_directas"]:
+        ledger(path, "edicion-directa", agent=role, task=task, nota=", ".join(audit["ediciones_directas"]))
+    if audit["cambios_fuera_de_fase"] or audit["commits_en_fase"]:
+        nota = ", ".join(audit["cambios_fuera_de_fase"]) + (" (+commits)" if audit["commits_en_fase"] else "")
+        ledger(path, "cambios-fuera-de-fase", agent=role, task=task, nota=nota)
+
+
 def execute(a, role, cfg, policy, path, prompt):
     env = dict(os.environ, RED_ROLE=role, RED_PHASE=a.phase, RED_OP=a.op, RED_OP_DIR=path)
     resume = a.resume
     sessions_dir = os.path.join(path, "sessions")
     os.makedirs(sessions_dir, exist_ok=True)
     idle_s, hard_s = limits(cfg)
+    before = flow_control.snapshot(a.cwd)
     for attempt in (1, 2):
         cmd = build_cmd(role, cfg, policy, resume, remote=bool(a.destinations))
         ledger(path, "lanzado", agent=role, task=a.task, nota=f"intento {attempt} cwd={a.cwd}", resume=resume)
         try:
-            code, summary, _, raw, err = run_stream(resolve_claude() + cmd[1:], prompt, env, a.cwd,
+            code, summary, events, raw, err = run_stream(resolve_claude() + cmd[1:], prompt, env, a.cwd,
                                                     idle_s, idle_reporter(path, role, a.task), hard_s)
         except StreamTimeout as exc:
             ledger(path, "timeout", agent=role, task=a.task, nota=str(exc))
             return {"role": role, "error": f"timeout: {exc}"}, EXIT_FAILED
         n = len(os.listdir(sessions_dir)) + 1
         record_file = os.path.join(sessions_dir, f"{role}-{n}.json")
-        write_json(record_file, {"ts": now(), "role": role, "attempt": attempt, "exit": code, "cwd": a.cwd,
-                                 "cmd": cmd, "payload": summary, "raw": raw[-20000:], "stderr": err[-5000:]})
+        audit = audit_session(a, cfg, events, before)
+        ledger_audit(path, role, a.task, audit)
+        write_json(record_file, {"ts": now(), "role": role, "phase": a.phase, "flow": a.flow_name,
+                                 "attempt": attempt, "exit": code, "cwd": a.cwd, "cmd": cmd, "payload": summary,
+                                 "auditoria": audit, "raw": raw[-20000:], "stderr": err[-5000:]})
         result = summary["result"]
         if code == 0 and result:
             report = parse_report(result)
             ledger(path, "reporte", agent=role, task=a.task, session_id=summary["session_id"],
                    costo=summary["total_cost_usd"], archivo=record_file,
                    estado=(report or {}).get("estado") or "SIN-FORMATO")
-            return {"role": role, "session_id": summary["session_id"], "file": record_file,
-                    "cost_usd": summary["total_cost_usd"], "report": report, "result": result}, 0
+            return {"role": role, "phase": a.phase, "session_id": summary["session_id"], "file": record_file,
+                    "cost_usd": summary["total_cost_usd"], "auditoria": audit, "report": report,
+                    "result": result}, 0
         evento = "vacio" if code == 0 else "error"
         ledger(path, evento, agent=role, task=a.task, nota=f"exit={code} {err.strip()[-300:]}",
                costo=summary["total_cost_usd"], archivo=record_file)
@@ -351,9 +377,21 @@ def main():
         why = forbidden_reason(brief, policy, bool(a.destinations))
         if why:
             raise Refused(EXIT_FORBIDDEN, f"brief rechazado ({why}): requiere autorizacion del usuario")
+        if a.resume and a.message:
+            why = forbidden_reason({"message": a.message}, policy, bool(a.destinations))
+            if why:
+                raise Refused(EXIT_FORBIDDEN, f"mensaje de resume rechazado ({why}): requiere autorizacion del usuario")
+        try:
+            a.flow_name, a.flow_cfg = flow_control.flow_for(a.role, cfg, brief, policy)
+        except ValueError as exc:
+            raise Refused(EXIT_USAGE, str(exc)) from exc
+        denial = flow_control.approval_error(cfg, a.phase, path)
+        if denial:
+            raise Refused(EXIT_FORBIDDEN, denial)
         check_workspace(cfg, path, a.cwd)
+        flow_lines = flow_control.flow_prompt(a.flow_name, a.flow_cfg, a.phase)
         prompt = a.message if a.resume and a.message else render_prompt(
-            a.role, a.op, brief, a.destinations, a.cwd, a.phase)
+            a.role, a.op, brief, a.destinations, a.cwd, a.phase, flow_lines)
         if a.dry_run:
             register(path, a.role, None)
             cmd = build_cmd(a.role, cfg, policy, a.resume, remote=bool(a.destinations))
