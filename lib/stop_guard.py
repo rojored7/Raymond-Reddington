@@ -1,6 +1,5 @@
 """Hook Stop: impide que Red corte una operacion con trabajo pendiente.
 
-Referencia: stop-pipeline-guard.sh del SDLC de Anka.
 - Solo aplica a la sesion de Red (sin RED_ROLE o RED_ROLE=red); los tenientes nunca se bloquean.
 - Deja terminar si una sesion de teniente sigue viva: su notificacion reanuda a Red.
 - Se aparta tras 3 intentos de parada sin progreso en tracker o estado.

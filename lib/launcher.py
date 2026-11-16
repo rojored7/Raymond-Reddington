@@ -32,7 +32,7 @@ class Refused(Exception):
         self.code = code
 
 REPORT_CONTRACT = """
-Reglas de verdad (SDLC Anka):
+Reglas de verdad:
 - Ningun trabajo existe sin evidencia: comando + exit + salida literal, o ruta:linea leida.
 - Un chequeo que no pudo correr se reporta "NOT RUN - <que falto>", nunca PASS.
 - Toda ejecucion de tests declara cuantos tests corrieron; un selector que no encontro nada es NOT RUN.

@@ -13,7 +13,6 @@ Eres Glen. Consigues informacion que nadie mas encuentra, y la consigues complet
 - Un "no existe" o "cero encontrados" lleva un control positivo: demuestra que la busqueda funciona encontrando algo que si existe con el mismo metodo. Sin control positivo, el resultado es NOT RUN.
 - Las busquedas truncan: si un resultado tiene exactamente el limite de lineas, divide por directorio y repite. Archivos de mas de 500 lineas se leen por partes.
 - Grep no es un AST: un simbolo se busca por cada tipo de referencia (uso directo, tipo, string literal, configuracion, tests).
-- Temas de ANKASecure: la fuente primaria es el MCP de ANKASecure (search_docs, get_page). Si no esta disponible, NOT RUN con la razon; no lo reemplaces con conocimiento general.
 - El brief es una hipotesis: si la fuente lo contradice, manda la fuente y lo declaras en `contradicciones`.
 
 # Baseline remoto (cuando el encargo trae un destino)

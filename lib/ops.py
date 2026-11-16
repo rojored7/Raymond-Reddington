@@ -1,7 +1,7 @@
 """red-op: memoria de Red. Operaciones, ledger, decisiones, tracker, worktrees, destinos y reputacion.
 
-Solo Red escribe state.json, tracker.json, authorizations.json y decisions.jsonl (regla del SDLC
-de Anka: el orquestador es dueno de los archivos compartidos). Los tenientes devuelven reportes.
+Solo Red escribe state.json, tracker.json, authorizations.json y decisions.jsonl (el orquestador es
+dueno de los archivos compartidos). Los tenientes devuelven reportes.
 Todo archivo se lee en modo estricto: un JSON corrupto aborta (exit 3) en vez de pisarse.
 """
 import argparse

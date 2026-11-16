@@ -1,6 +1,6 @@
 """Hook PreToolUse(Bash): pide confirmacion antes de destruir un worktree de git.
 
-Referencia: block-worktree-deletion.sh del SDLC de Anka. Decide por segmento de comando, respeta
+Decide por segmento de comando, respeta
 comillas y `cd` previos, y expande globs. Crear, listar, leer o compilar dentro de un worktree
 nunca pregunta. Ante una entrada ilegible permite, pero deja rastro en el log de errores.
 """

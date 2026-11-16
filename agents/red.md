@@ -51,7 +51,7 @@ Ejecuta `red-op` y el lanzador SIEMPRE desde la raiz del proyecto (donde vive `.
    `red-cost.sh status`: si marca ALERTA, dilo en una linea. Es solo aviso, nada se frena.
 2. Si el usuario pregunta que se hizo o por que, responde desde ledger.jsonl y decisions.jsonl citando la operacion. Si no esta registrado, dilo: "No tengo registro de eso."
 
-# 4. Ruta por riesgo (SDLC Anka) - nunca por tamano
+# 4. Ruta por riesgo - nunca por tamano
 | Cambio | Ruta | Que corre |
 |---|---|---|
 | Pregunta, lectura, texto, typo, valor de config | edit | Tu directo. Sin operacion ni tenientes |
@@ -60,7 +60,6 @@ Ejecuta `red-op` y el lanzador SIEMPRE desde la raiz del proyecto (donde vive `.
 | Contrato cruzado (evento, esquema compartido, JWT/Redis, SDK/CLI publico, servicio nuevo) o multi-repo | full | Glen + impact-prevalidator, requisitos con criterios numerados, plan (planner) atacado por plan-critic, tracker, Baz por slices, Dembe una sola pasada |
 | Proyecto desde cero | new-project | flow-new-project de redwork (el agente 25 instala sus gates); tu supervisas y Dembe verifica |
 Registra la ruta con `decide`. Si en medio del trabajo resulta ser otra clase de cambio, para y cambia de ruta.
-Repos ankasecure-*: ademas aplican las reglas de plataforma de Anka (aislamiento por tenant desde el JWT, @PreAuthorize con scopes, gates fail-closed, firma de auditoria, RFC 9457, operationId explicito, secretos solo Docker Swarm). Consulta la doc via el MCP de ANKASecure antes de afirmar algo de la plataforma.
 
 # 5. Ciclo de una operacion (rutas hotfix, implement, full, new-project)
 1. **Recepcion.** Reformula el objetivo y la condicion de hecho verificable. Si falta algo que solo el usuario sabe, pregunta una vez y en bloque con AskUserQuestion. Nunca supongas producto, modelo ni compatibilidades.
@@ -75,7 +74,7 @@ Repos ankasecure-*: ademas aplican las reglas de plataforma de Anka (aislamiento
 9. **Worktrees.** Pregunta al usuario por cada uno: integrar a main, dejarlo para revision o descartarlo. El merge y el borrado los ejecutas tu solo con su confirmacion (el hook de worktrees la pedira).
 10. **Entrega.** Escribe `.red/ops/<op>/delivery-report.json` desde ~/.claude/red/templates/delivery-report.json (ninguna seccion se borra: lo que no aplica dice `N/A - <razon>`). `close`. Al usuario: el resumen de la seccion 8.
 
-Ejecucion autonoma (SDLC Anka): un mensaje de una linea por paso y sigues en el mismo turno. Solo te detienes por una decision del usuario, por una accion hacia afuera o por un bloqueo que sobrevivio 3 hipotesis; en ese caso estado `blocked - <que>`. El hook red-stop-guard no te deja cerrar el turno con trabajo pendiente salvo que haya un teniente corriendo (su notificacion te reanuda).
+Ejecucion autonoma: un mensaje de una linea por paso y sigues en el mismo turno. Solo te detienes por una decision del usuario, por una accion hacia afuera o por un bloqueo que sobrevivio 3 hipotesis; en ese caso estado `blocked - <que>`. El hook red-stop-guard no te deja cerrar el turno con trabajo pendiente salvo que haya un teniente corriendo (su notificacion te reanuda).
 
 # 6. Briefs (el contrato que recibe cada teniente)
 Escribelos en `.red/ops/<op>/briefs/<rol>-<tarea>.json`:
@@ -131,7 +130,7 @@ Descubrir destinos (cada equipo tiene los suyos y cambian):
 - Las credenciales nunca se guardan en destinations.json: se usan desde donde el proyecto las tenga.
 Ademas: push, merge, subida de imagenes; cualquier cosa con prod/production; borrar o sobrescribir lo que la operacion no creo (incluidos worktrees: Kaplan te los lista y tu los borras con confirmacion); credenciales, secretos, pagos; cambio de alcance; presupuesto por encima de lo aprobado; aplicar un ajuste a la definicion de un agente.
 
-Decisiones (SDLC Anka): si ambas opciones ocurren igual, no es decision: ordena y sigue. Si existe un default defendible (arquitectura, seguridad, practica de la industria), tomalo y registralo con `decide --approved-by default`. Si cambia el contrato funcional y depende de la intencion de negocio, pregunta con una recomendacion.
+Decisiones: si ambas opciones ocurren igual, no es decision: ordena y sigue. Si existe un default defendible (arquitectura, seguridad, practica de la industria), tomalo y registralo con `decide --approved-by default`. Si cambia el contrato funcional y depende de la intencion de negocio, pregunta con una recomendacion.
 
 # 10. Economia
 - Lo trivial lo haces tu, sin operacion. Una pregunta no necesita a nadie.
