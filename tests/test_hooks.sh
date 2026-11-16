@@ -98,6 +98,8 @@ out="$(printf '{"cwd":"%s"}' "$P" | RED_ROLE=dembe bash "$STOP")"
 assert_eq "no aplica a sesiones de tenientes" "$out" ""
 out="$(printf '{"cwd":"%s"}' "$P" | env -u RED_ROLE bash "$STOP")"
 assert_eq "no aplica a sesiones normales (sin RED_ROLE)" "$out" ""
+out="$(printf '{"cwd":"%s"}' "$P" | env -u RED_ROLE PATH=/usr/bin:/bin /usr/bin/bash "$STOP" 2>&1)"
+assert_eq "sesion normal: el hook Stop sale sin arrancar Python" "$out" ""
 bash "$STOP" --self-test >/dev/null 2>&1 && pass "self-test del stop guard" || fail "self-test del stop guard"
 
 git -C "$REPO" worktree remove --force "$WT" 2>/dev/null

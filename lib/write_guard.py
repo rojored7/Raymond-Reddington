@@ -7,19 +7,28 @@ asi que aplica tambien a los subagentes del teniente. Reglas:
 - "*" = sin restriccion; una lista = solo esas rutas, relativas a la raiz git del directorio de
   trabajo. "dir/**" cubre todo lo que cuelga de dir. "@lecciones" es el archivo global de lecciones.
 - rol o fase desconocidos: se niega (falla cerrado).
-Limite conocido: no controla escrituras hechas por Bash; eso lo audita Dembe con git status.
+- Red (RED_ROLE=red) escribe donde quiera salvo approvals.jsonl: las aprobaciones solo las registra
+  el hook desde el mensaje del usuario.
+Falla CERRADO: si este modulo no puede cargarse, sale con 3 y hooks/red-write-guard.sh niega.
+Limite conocido: no controla escrituras hechas por Bash; eso lo audita el lanzador (git antes/despues)
+y Dembe.
 """
 import json
 import os
 import sys
 
+EXIT_BROKEN = 3
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from common import data_dir, log_error, read_json, run, to_native  # noqa: E402
+try:
+    from common import data_dir, log_error, read_json, run, to_native  # noqa: E402
+except Exception:  # noqa: BLE001 - guard roto: el .sh niega la escritura
+    sys.exit(EXIT_BROKEN)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WRITE_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
 LESSONS_TOKEN = "@lecciones"
 LESSONS_FILE = "lecciones-aprendidas.md"
+RED_PROTECTED = ("approvals.jsonl",)
 
 
 def lessons_path():
@@ -38,20 +47,37 @@ def workspace_root(cwd):
 
 
 def _norm(path):
-    return os.path.normcase(os.path.normpath(os.path.abspath(path)))
+    """Ruta real (resuelve symlinks/junctions) y normalizada para comparar."""
+    return os.path.normcase(os.path.realpath(os.path.abspath(path)))
+
+
+def _pattern(text):
+    text = text.replace("\\", "/")
+    return text.lower() if os.name == "nt" else text
 
 
 def matches(target, pattern, root):
     if pattern == LESSONS_TOKEN:
         return _norm(target) == _norm(lessons_path())
-    rel = os.path.relpath(_norm(target), _norm(root))
-    if rel.startswith(".."):
+    try:
+        rel = os.path.relpath(_norm(target), _norm(root))
+    except ValueError:  # otra unidad o ruta UNC: fuera del proyecto
         return False
-    rel = rel.replace(os.sep, "/")
-    if pattern.endswith("/**"):
-        prefix = os.path.normcase(pattern[:-3])
+    if rel == ".." or rel.startswith(".." + os.sep):
+        return False
+    rel = _pattern(rel.replace(os.sep, "/"))
+    pat = _pattern(pattern)
+    if pat.endswith("/**"):
+        prefix = pat[:-3]
         return rel == prefix or rel.startswith(prefix + "/")
-    return rel == os.path.normcase(pattern)
+    return rel == pat
+
+
+def resolve_target(params, cwd):
+    raw = to_native(params.get("file_path") or params.get("notebook_path") or "")
+    if raw and not os.path.isabs(raw):
+        raw = os.path.join(to_native(cwd) or os.getcwd(), raw)
+    return raw
 
 
 def deny(reason):
@@ -60,7 +86,13 @@ def deny(reason):
 
 
 def decide(payload, role, phase):
-    if payload.get("tool_name") not in WRITE_TOOLS or not role or role == "red":
+    if payload.get("tool_name") not in WRITE_TOOLS or not role:
+        return None
+    if role == "red":
+        target = resolve_target(payload.get("tool_input") or {}, payload.get("cwd"))
+        if os.path.basename(target).lower() in RED_PROTECTED:
+            return deny("las aprobaciones solo las registra el hook desde el mensaje del usuario: "
+                        f"Red no escribe {os.path.basename(target)}")
         return None
     policy = role_policy(role)
     if not isinstance(policy, dict) or not policy:
@@ -71,8 +103,7 @@ def decide(payload, role, phase):
         return deny(f"fase '{phase}' invalida para {role}. Fases: {', '.join(policy)}")
     if allowed == "*":
         return None
-    params = payload.get("tool_input") or {}
-    target = to_native(params.get("file_path") or params.get("notebook_path") or "")
+    target = resolve_target(payload.get("tool_input") or {}, payload.get("cwd"))
     if not target:
         return deny("escritura sin ruta: no se puede verificar")
     root = workspace_root(payload.get("cwd"))

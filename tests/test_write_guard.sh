@@ -52,6 +52,30 @@ out="$(write intruso - Write "$P/app/x.py")"
 denied  "rol desconocido: se niega (falla cerrado)" "$out"
 denied  "fase invalida para el rol: se niega" "$(write baz inventada Write "$P/outputs/a.md")"
 assert_contains "la negacion explica que se permite" "$(write baz plan Edit "$P/app/x.py")" "outputs/"
+assert_contains "la negacion de ruta es por politica, no por error" "$(write baz plan Edit "$P/app/x.py")" "solo puede escribir"
+assert_contains "la negacion de glen es por politica, no por error" "$(write glen investigate Write "$P/app/x.py")" "solo puede escribir"
+
+# --- Red no puede fabricar aprobaciones ---
+denied  "Red no escribe approvals.jsonl" "$(write red - Write "$P/.red/ops/op1/approvals.jsonl")"
+allowed "Red escribe el resto de .red" "$(write red - Write "$P/.red/ops/op1/briefs/baz-t1.json")"
+
+# --- rutas: relativas contra el cwd del evento, estilo Windows y mayusculas ---
+allowed "ruta relativa se resuelve contra el cwd del evento" "$(write baz plan Write "outputs/rel.md")"
+denied  "ruta relativa fuera de lo permitido" "$(write baz plan Write "app/rel.py")"
+WINP="$(cygpath -w "$P/outputs/win.md" 2>/dev/null || echo "$P/outputs/win.md")"
+allowed "ruta estilo Windows dentro de outputs" "$(write baz plan Write "$WINP")"
+allowed "mayusculas distintas en Windows" "$(write baz plan Write "$P/OUTPUTS/caps.md")"
+
+# --- falla cerrado: sin Python o con el guard roto, un teniente no escribe ---
+payload='{"tool_name":"Write","cwd":"'"$P"'","tool_input":{"file_path":"'"$P"'/outputs/a.md"}}'
+out="$(printf '%s' "$payload" | env PATH=/usr/bin:/bin RED_ROLE=baz RED_PHASE=plan /usr/bin/bash "$WG")"
+assert_contains "sin Python el guard niega (no deja pasar)" "$out" '"deny"'
+assert_eq "sin Python una sesion normal no se toca" "$(printf '%s' "$payload" | env -u RED_ROLE PATH=/usr/bin:/bin /usr/bin/bash "$WG")" ""
+BROKEN="$T/rotos"; mkdir -p "$BROKEN"; cp -r "$ROOT/hooks" "$ROOT/scripts" "$ROOT/lib" "$BROKEN/"
+echo "esto no es python (" >> "$BROKEN/lib/common.py"
+out="$(printf '%s' "$payload" | RED_ROLE=baz RED_PHASE=plan bash "$BROKEN/hooks/red-write-guard.sh")"
+assert_contains "con el guard roto niega (no deja pasar)" "$out" '"deny"'
+bash "$BROKEN/hooks/red-write-guard.sh" --self-test >/dev/null 2>&1; assert_eq "self-test del guard roto falla" "$?" "1"
 allowed "otras herramientas no se controlan aqui" "$(printf '{"tool_name":"Read","tool_input":{"file_path":"x"}}' | RED_ROLE=glen bash "$WG")"
 bash "$WG" --self-test >/dev/null 2>&1 && pass "self-test del write guard" || fail "self-test del write guard"
 

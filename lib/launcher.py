@@ -22,9 +22,15 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import (CorruptJSON, append_jsonl, data_dir, file_lock, ledger, live_sessions,  # noqa: E402
                     now, op_dir, read_json, read_json_strict, run, to_native, utf8_stdio, write_json)
-import flow_control  # noqa: E402
 from session_stream import StreamTimeout, audit_events, run_stream  # noqa: E402
-from write_guard import workspace_root  # noqa: E402
+
+try:  # el control de fases depende del guard de escritura: si no carga, no se lanza a nadie
+    import flow_control  # noqa: E402
+    from write_guard import workspace_root  # noqa: E402
+except (Exception, SystemExit) as _guard_exc:  # noqa: BLE001
+    print(f"lanzamiento rechazado: guard de escritura roto ({type(_guard_exc).__name__}): "
+          "no se lanza a ningun teniente", file=sys.stderr)
+    sys.exit(3)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EXIT_USAGE, EXIT_FORBIDDEN, EXIT_BUSY, EXIT_FAILED = 2, 3, 4, 5
@@ -140,9 +146,26 @@ def resolve_phase(role, cfg, brief):
     return phase
 
 
+def guard_hook():
+    return os.path.join(ROOT, "hooks", "red-write-guard.sh").replace(os.sep, "/")
+
+
+def preflight_guard():
+    """El guard de escritura se prueba antes de cada lanzamiento: sin guard que funcione no hay teniente."""
+    bash = os.environ.get("RED_BASH") or shutil.which("bash") or "bash"
+    try:
+        proc = subprocess.run([bash, guard_hook(), "--self-test"], capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return f"guard de escritura sin verificar ({type(exc).__name__}): no se lanza a ningun teniente"
+    if proc.returncode != 0:
+        detail = (proc.stdout or proc.stderr).strip()[-200:] or f"exit {proc.returncode}"
+        return f"guard de escritura roto ({detail}): no se lanza a ningun teniente"
+    return None
+
+
 def guard_settings():
     """Hook de escritura inyectado en cada teniente: no depende de la instalacion global."""
-    hook = os.path.join(ROOT, "hooks", "red-write-guard.sh").replace(os.sep, "/")
+    hook = guard_hook()
     return json.dumps({"hooks": {"PreToolUse": [{"matcher": "Edit|Write|MultiEdit|NotebookEdit",
                                                  "hooks": [{"type": "command", "command": f'bash "{hook}"'}]}]}})
 
@@ -391,6 +414,9 @@ def main():
         if denial:
             raise Refused(EXIT_FORBIDDEN, denial)
         check_workspace(cfg, path, a.cwd)
+        broken = preflight_guard()
+        if broken:
+            raise Refused(EXIT_FORBIDDEN, broken)
         flow_lines = flow_control.flow_prompt(a.flow_name, a.flow_cfg, a.phase)
         prompt = a.message if a.resume and a.message else render_prompt(
             a.role, a.op, brief, a.destinations, a.cwd, a.phase, flow_lines)

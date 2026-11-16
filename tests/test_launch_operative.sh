@@ -246,9 +246,9 @@ assert_eq "un reporte que no es JSON queda como report null" "$("$PY" -c "import
 
 # --- concurrencia (B3): dos lanzamientos simultaneos ---
 rm -f "$T/count"
-RED_FAKE_MODE=sleep RED_FAKE_SLEEP=3 bash "$L" glen op1 "$BRIEF" > "$T/g.out" 2>&1 &
+RED_FAKE_MODE=sleep RED_FAKE_SLEEP=8 bash "$L" glen op1 "$BRIEF" > "$T/g.out" 2>&1 &
 P1=$!
-RED_FAKE_MODE=sleep RED_FAKE_SLEEP=3 bash "$L" baz op1 "$BRIEF" > "$T/b.out" 2>&1 &
+RED_FAKE_MODE=sleep RED_FAKE_SLEEP=8 bash "$L" baz op1 "$BRIEF" > "$T/b.out" 2>&1 &
 P2=$!
 for _ in $(seq 1 60); do
   n="$("$PY" -c "import json,sys;print(len(json.load(open(sys.argv[1]))['sessions']))" "$OPD/running.json" 2>/dev/null || echo 0)"
@@ -318,6 +318,13 @@ out="$(RED_FAKE_MODE=skip bash "$L" baz op1 "$T/bug-plan.json" 2>&1)"
 assert_contains "detecta el agente obligatorio que no corrio" "$(aud agentes_faltantes)" "code-explorer"
 assert_eq "la auditoria marca la entrega" "$(aud ok)" "False"
 assert_contains "el faltante queda en el ledger" "$(cat "$OPD/ledger.jsonl")" '"evento": "agentes-faltantes"'
+
+# --- sin guard de escritura que funcione no se lanza a nadie ---
+RB="$T/rr-roto"; mkdir -p "$RB"; cp -r "$ROOT/hooks" "$ROOT/scripts" "$ROOT/lib" "$RB/"
+echo "esto no es python (" >> "$RB/lib/write_guard.py"
+out="$(bash "$RB/scripts/launch-operative.sh" glen op1 "$BRIEF" --dry-run 2>&1)"; rc=$?
+assert_eq "guard de escritura roto: el lanzador se niega" "$rc" "3"
+assert_contains "el rechazo nombra el guard" "$out" "guard de escritura"
 
 # --- solo el coordinador (Baz) tiene prohibido editar: Glen en init escribe sus documentos ---
 sed 's/"task":"t1"/"task":"t1","phase":"init"/' "$BRIEF" > "$T/glen-init.json"
