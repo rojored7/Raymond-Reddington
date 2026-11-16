@@ -20,8 +20,9 @@ out="$(dry dembe op1 "$BRIEF")"
 assert_contains "dry-run usa --agent dembe" "$out" '"--agent", "dembe"'
 assert_contains "dry-run usa modo headless -p" "$out" '"-p"'
 assert_contains "dry-run usa permission-mode auto" "$out" '"--permission-mode", "auto"'
-assert_contains "dry-run pide salida json" "$out" '"--output-format", "json"'
-assert_contains "dry-run aplica presupuesto" "$out" '"--max-budget-usd"'
+assert_contains "dry-run pide salida en streaming" "$out" '"--output-format", "stream-json"'
+assert_contains "stream-json va con --verbose" "$out" '"--verbose"'
+assert_not_contains "sin tope de presupuesto por sesion" "$out" 'max-budget-usd'
 assert_contains "dembe tiene Edit prohibido" "$out" 'Edit'
 assert_contains "bloqueo comun: git push" "$out" 'Bash(git push:*)'
 assert_contains "bloqueo comun: --no-verify" "$out" 'no-verify'
@@ -31,16 +32,13 @@ assert_contains "zeng usa el modelo mas economico" "$(dry zeng op1 "$BRIEF")" '"
 assert_contains "zeng tiene permiso explicito para red-cost" "$(dry zeng op1 "$BRIEF")" '"--allowedTools", "Bash(bash ~/.claude/red/scripts/red-cost.sh:*)"'
 assert_not_contains "otros roles no reciben allowedTools de zeng" "$(dry glen op1 "$BRIEF")" 'red-cost.sh'
 assert_contains "kaplan no puede borrar worktrees" "$(dry kaplan op1 "$BRIEF")" 'Bash(git worktree remove:*)'
-assert_contains "presupuesto explicito" "$(dry baz op1 "$BRIEF" --budget 1.5)" '"1.5"'
+bash "$L" baz op1 "$BRIEF" --budget 1.5 --dry-run >/dev/null 2>&1; assert_eq "--budget ya no existe" "$?" "2"
 assert_contains "resume arma --resume" "$(dry baz op1 "$BRIEF" --resume abc-123 --message 'falta evidencia')" '"--resume", "abc-123"'
 assert_contains "prohibiciones en out_of_scope no rechazan el brief" "$(dry glen op1 "$BRIEF"; echo "rc=$?")" "rc=0"
 
 bash "$L" nadie op1 "$BRIEF" --dry-run >/dev/null 2>&1; assert_eq "rol desconocido falla" "$?" "2"
 bash "$L" baz "../../x" "$BRIEF" --dry-run >/dev/null 2>&1; assert_eq "op con traversal se rechaza" "$?" "2"
 bash "$L" baz op-inexistente "$BRIEF" --dry-run >/dev/null 2>&1; assert_eq "op sin state.json se rechaza" "$?" "2"
-bash "$L" baz op1 "$BRIEF" --budget inf --dry-run >/dev/null 2>&1; assert_eq "presupuesto inf se rechaza" "$?" "2"
-bash "$L" baz op1 "$BRIEF" --budget 999 --dry-run >/dev/null 2>&1; assert_eq "presupuesto sobre el tope se rechaza" "$?" "2"
-bash "$L" baz op1 "$BRIEF" --budget 0 --dry-run >/dev/null 2>&1; assert_eq "presupuesto cero se rechaza" "$?" "2"
 bash "$L" baz op1 "$BRIEF" --resume 'x;rm' --message m --dry-run >/dev/null 2>&1; assert_eq "resume con caracteres invalidos se rechaza" "$?" "2"
 bash "$L" baz op1 "$BRIEF" --resume otra-sesion --message m --dry-run >/dev/null 2>&1; assert_eq "resume de sesion ajena a la operacion se rechaza" "$?" "2"
 cat > "$T/prod.json" <<'EOF'
@@ -132,19 +130,29 @@ open(path, "w").write(str(n))
 open(path + ".args", "a").write(json.dumps(sys.argv[1:]) + "\n")
 open(path + ".env", "a").write(json.dumps({k: v for k, v in os.environ.items() if k.startswith(("GH_", "GITHUB_", "AWS_", "RED_", "ANTHROPIC_"))}) + "\n")
 mode = os.environ.get("RED_FAKE_MODE", "")
-if mode == "sleep":
+sid = "s-empty" if (mode == "empty_once" and n == 1) else f"s-{n}"
+def emit(ev):
+    print(json.dumps(ev), flush=True)
+def result(text, cost=0.01):
+    emit({"type": "result", "subtype": "success", "result": text, "session_id": sid, "total_cost_usd": cost})
+emit({"type": "system", "subtype": "init", "session_id": sid, "cwd": os.getcwd()})
+if mode in ("sleep", "quiet"):  # quiet: silencio y luego responde (aviso de inactividad, sin matar)
     time.sleep(float(os.environ.get("RED_FAKE_SLEEP", "3")))
 if mode == "fenced":
     rep = {"estado": "COMPLETADO", "hecho": [], "contradicciones": []}
     fence = chr(96) * 3
-    print(json.dumps({"result": fence + "json" + chr(10) + json.dumps(rep) + chr(10) + fence,
-                      "session_id": f"s-{n}", "total_cost_usd": 0.01}))
+    result(fence + "json" + chr(10) + json.dumps(rep) + chr(10) + fence)
+    sys.exit(0)
+if mode == "multi":  # subagentes en segundo plano: varios result, el reporte es el ultimo con texto
+    result("Lanzados 2 agentes, espero sus notificaciones.", 0.30)
+    result("", 0.30)
+    result('{"estado": "COMPLETADO", "hecho": [], "contradicciones": []}', 0.90)
+    result("", 0.90)
     sys.exit(0)
 if mode == "empty_once" and n == 1:
-    print(json.dumps({"result": "", "session_id": "s-empty"}))
+    result("")
 else:
-    print(json.dumps({"result": "ESTADO COMPLETADO role=" + os.environ.get("RED_ROLE", ""),
-                      "session_id": f"s-{n}", "total_cost_usd": 0.01}))
+    result("ESTADO COMPLETADO role=" + os.environ.get("RED_ROLE", ""))
 EOF
 export RED_CLAUDE_BIN="$FAKE/claude.py" RED_FAKE_COUNTER="$T/count"
 
@@ -208,7 +216,18 @@ bash "$L" glen op1 "$BRIEF" --dry-run >/dev/null 2>&1; assert_eq "mismo rol en p
 wait "$P1" "$P2"
 assert_eq "al terminar ambos running.json queda vacio" "$(json_get "$OPD/running.json" sessions)" "[]"
 
-# --- timeout (S7) ---
+# --- varios result por subagentes en segundo plano ---
+out="$(RED_FAKE_MODE=multi bash "$L" glen op1 "$BRIEF" 2>&1)"
+assert_eq "toma el ultimo result con texto como reporte" "$("$PY" -c "import json,sys;print(json.loads(sys.stdin.read())['report']['estado'])" <<< "$out")" "COMPLETADO"
+assert_eq "el costo es el acumulado final" "$("$PY" -c "import json,sys;print(json.loads(sys.stdin.read())['cost_usd'])" <<< "$out")" "0.9"
+
+# --- inactividad: avisa a Red, no mata ---
+out="$(RED_FAKE_MODE=quiet RED_FAKE_SLEEP=3 RED_INACTIVITY_SECONDS=1 bash "$L" glen op1 "$BRIEF" 2>&1)"; rc=$?
+assert_eq "una sesion lenta no se mata por inactividad" "$rc" "0"
+assert_contains "registra la inactividad en el ledger" "$(cat "$OPD/ledger.jsonl")" '"evento": "inactivo"'
+assert_contains "deja la alerta para Red en alerts.jsonl" "$(cat "$OPD/alerts.jsonl" 2>/dev/null)" '"rol": "glen"'
+
+# --- timeout duro solo si se pide explicitamente (S7) ---
 out="$(RED_FAKE_MODE=sleep RED_FAKE_SLEEP=20 RED_TIMEOUT_SECONDS=2 bash "$L" glen op1 "$BRIEF" 2>&1)"; rc=$?
 assert_eq "sesion colgada termina con codigo 5" "$rc" "5"
 assert_contains "registra el timeout en el ledger" "$(cat "$OPD/ledger.jsonl")" '"evento": "timeout"'

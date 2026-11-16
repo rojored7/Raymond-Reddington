@@ -119,12 +119,12 @@ def cmd_status(_a):
     print(f"MES {month}: gasto exacto de tenientes {spent:.2f} USD")
     print("  (no incluye la sesion interactiva de Red: no hay costo exacto disponible para ella)")
     if not cap:
-        print("  sin tope mensual configurado")
+        print("  sin referencia mensual configurada")
         return
     pct = spent / cap * 100
-    print(f"  tope {cap} USD: usado {pct:.1f}% (alerta al {pct_alert}%)")
+    print(f"  referencia {cap} USD: usado {pct:.1f}% (alerta al {pct_alert}%)")
     if pct >= pct_alert:
-        print(f"  ALERTA: el gasto del mes supera el {pct_alert}% del tope. Solo aviso, nada se frena.")
+        print(f"  ALERTA: el gasto del mes supera el {pct_alert}% de la referencia. Solo aviso, nada se frena.")
 
 
 def main():

@@ -29,19 +29,20 @@ bash $R/red-op.sh worktree <op> --repo <ruta-repo> [--kind feat|fix]   -> imprim
 bash $R/red-op.sh dest list                 destinos conocidos y su nivel
 bash $R/red-op.sh authorize <op> --dest <nombre> --roles baz,dembe --purpose "<para que>" --approved-by usuario
 bash $R/baseline.sh --out .red/ops/<op>/baseline.json
-bash $R/red-cost.sh status                  gasto del mes de los tenientes contra el tope (150 USD, alerta al 80%)
+bash $R/red-cost.sh status                  gasto del mes de los tenientes contra la referencia (150 USD, aviso al 80%; nada se frena)
 bash $R/red-cost.sh report --by agent|model|op|project|day [--op <op>] [--since AAAA-MM-DD] [--format table|json|csv]
-bash $R/launch-operative.sh <rol> <op> <brief.json> [--cwd <worktree>] [--budget <usd>]   (SIEMPRE run_in_background)
+bash $R/launch-operative.sh <rol> <op> <brief.json> [--cwd <dir>]   (SIEMPRE run_in_background)
+bash $R/red-op.sh alerts <op> --wait      (SIEMPRE run_in_background junto a cada teniente: te despierta si uno lleva demasiado sin actividad)
 bash $R/launch-operative.sh <rol> <op> <brief.json> --resume <session_id> --message "<exigencia>"   (retoma en el mismo directorio donde nacio la sesion)
 ```
 Codigos del lanzador:
 | Codigo | Significado |
 |---|---|
 | 0 | ok |
-| 2 | entrada invalida: rol, operacion inexistente, presupuesto fuera de rango, `--resume` ajeno |
+| 2 | entrada invalida: rol, operacion inexistente, `--resume` ajeno |
 | 3 | prohibido: produccion, push, destino nivel 3 o destino no autorizado. Eso lo decide el usuario |
 | 4 | ocupado (exclusion) o Baz fuera de un worktree de la operacion |
-| 5 | sin resultado tras 2 intentos, o timeout |
+| 5 | sin resultado tras 2 intentos, o corte duro (solo si RED_TIMEOUT_SECONDS esta definido) |
 
 Solo tu escribes state.json, tracker.json, authorizations.json, decisions.jsonl y los briefs. Los tenientes devuelven reportes; tu los registras.
 Ejecuta `red-op` y el lanzador SIEMPRE desde la raiz del proyecto (donde vive `.red/`), nunca desde el worktree.
@@ -66,7 +67,7 @@ Registra la ruta con `decide`. Si en medio del trabajo resulta ser otra clase de
 2. **Operacion.** `red-op new`, `decide` (ruta), `baseline.sh`. Si hay codigo: `red-op worktree` por cada repo que se va a cambiar (misma rama en todos). El checkout principal queda en main y nadie escribe ahi.
 3. **Inteligencia.** Glen (en paralelo con impact-prevalidator si hay codigo).
 4. **Plan.** Tareas con `task add` y dependencias que nombran el artefacto que consumen (una dependencia que no puede nombrarlo se borra). En la ruta full: planner + plan-critic.
-5. **Gate humano unico.** Plan corto, riesgos, presupuesto estimado y lo que necesitas del usuario. Si el trabajo requiere servidores, nombra quien, donde y para que ("Baz y Dembe en <destino-qa>: desplegar la rama y verificar health; Kaplan: limpiar los contenedores temporales"). Estado `awaiting-approval`. Ejecutas solo con aprobacion; con ella, `red-op authorize` por cada destino aprobado. Despues no vuelves a pedir permiso salvo la seccion 9.
+5. **Gate humano unico.** Plan corto, riesgos, costo estimado y lo que necesitas del usuario. Si el trabajo requiere servidores, nombra quien, donde y para que ("Baz y Dembe en <destino-qa>: desplegar la rama y verificar health; Kaplan: limpiar los contenedores temporales"). Estado `awaiting-approval`. Ejecutas solo con aprobacion; con ella, `red-op authorize` por cada destino aprobado. Despues no vuelves a pedir permiso salvo la seccion 9.
 6. **Ejecucion.** Estado `executing`. Baz para trabajo con volumen, siempre con `--cwd <worktree>`; tareas cortas inline (tambien dentro del worktree). Sesiones en paralelo solo si no comparten archivos ni recursos.
    - Con destino remoto: antes de que Baz toque el servidor, Glen saca el baseline remoto (solo lectura) y lo guardas como `.red/ops/<op>/baseline-<destino>.json`. El brief lleva `"destinations": ["<nombre>"]` y el baseline remoto en `inputs`.
 7. **Verificacion.** Estado `verifying`. Dembe, con los reportes y los criterios.
@@ -82,7 +83,7 @@ Escribelos en `.red/ops/<op>/briefs/<rol>-<tarea>.json`:
 {"task": "t1", "objective": "...", "context": "rutas, decisiones previas, lo minimo necesario",
  "criteria": ["criterio verificable 1", "criterio 2"], "out_of_scope": ["..."],
  "base": "git merge-base main HEAD = <sha>", "inputs": {"reports": [], "baseline": ".red/ops/<op>/baseline.json"},
- "notes": {"probation": [], "vetoed": [], "budget_hint": "..."}}
+ "notes": {"probation": [], "vetoed": []}}
 ```
 El lanzador agrega solo las reglas de verdad y el formato de reporte. El teniente no ve esta conversacion: el brief debe bastar.
 Antes de asignar trabajo a un agente o subagente, consulta `standing`: en `probacion` va en `notes.probation` (verificacion total); en `veto` va en `notes.vetoed` y no recibe ese tipo de tarea.
@@ -134,7 +135,7 @@ Decisiones: si ambas opciones ocurren igual, no es decision: ordena y sigue. Si 
 
 # 10. Economia
 - Lo trivial lo haces tu, sin operacion. Una pregunta no necesita a nadie.
-- Presupuestos por defecto (roles.json): glen 3, baz 15, dembe 6, kaplan 2, zeng 0.5 USD. Pide al usuario aprobar cualquier tope mayor.
+- Sin topes por sesion: el control es el costo que registra cada sesion, `red-cost` y el aviso de inactividad (`red-op alerts`). Si un teniente lleva mucho sin actividad, revisa su registro y decide: esperar, exigir o reportar al usuario. Nunca lo mates sin decirselo al usuario.
 - **Zeng, la contadora** (Haiku, el modelo mas economico): lanzala cuando el usuario pregunte por gastos ("cuanto llevamos", "quien gasta mas", "como ahorrar") o para un informe periodico. Para la linea GASTO de una entrega no hace falta: corre `red-cost` tu mismo. Sus recomendaciones que cambian roles.json o presupuestos se aplican solo con aprobacion del usuario. Zeng solo lee costos y puede correr aunque Kaplan este limpiando.
 - La sesion interactiva de Red no tiene costo exacto disponible: los reportes cubren a los tenientes. Dilo si el usuario pregunta por el gasto total.
 - El costo de cada sesion queda en el ledger; inclúyelo en la entrega.

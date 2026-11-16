@@ -5,12 +5,14 @@ Garantias que da el codigo y no la confianza:
 - un brief que pide produccion, push o deploy se rechaza: eso lo decide el usuario, no un teniente
 - exclusion: una sesion por rol y operacion; Kaplan solo con cero sesiones vivas; nada con Kaplan vivo
 - un resultado vacio o truncado es una falla y se relanza una sola vez
+- sin topes de presupuesto: el control es el costo registrado por sesion y el aviso de inactividad
+  (ledger + alerts.jsonl, que Red vigila con `red-op alerts --wait`); nunca se mata por lentitud.
+  El corte duro existe solo si se define RED_TIMEOUT_SECONDS.
 - todo queda en el ledger y en sessions/
 """
 import argparse
 import glob
 import json
-import math
 import os
 import re
 import shutil
@@ -18,8 +20,9 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from common import (CorruptJSON, data_dir, file_lock, ledger, live_sessions, now, op_dir,  # noqa: E402
-                    read_json, read_json_strict, run, to_native, write_json)
+from common import (CorruptJSON, append_jsonl, data_dir, file_lock, ledger, live_sessions,  # noqa: E402
+                    now, op_dir, read_json, read_json_strict, run, to_native, write_json)
+from session_stream import StreamTimeout, run_stream  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EXIT_USAGE, EXIT_FORBIDDEN, EXIT_BUSY, EXIT_FAILED = 2, 3, 4, 5
@@ -132,10 +135,10 @@ def render_prompt(role, op, brief, destinations, cwd):
     return "\n".join(lines) + "\n" + REPORT_CONTRACT
 
 
-def build_cmd(role, cfg, policy, budget, resume, remote=False):
+def build_cmd(role, cfg, policy, resume, remote=False):
     cmd = ["claude", "-p", "--agent", role, "--model", cfg["model"],
            "--permission-mode", cfg.get("permission_mode", "auto"),
-           "--max-budget-usd", str(budget), "--output-format", "json"]
+           "--output-format", "stream-json", "--verbose"]
     if resume:
         cmd += ["--resume", resume]
     if cfg.get("allowed"):
@@ -201,15 +204,20 @@ def resolve_claude():
     return [exe or "claude"]
 
 
-def run_claude(cmd, prompt, env, cwd, timeout):
-    argv = resolve_claude() + cmd[1:]
-    proc = subprocess.run(argv, input=prompt, capture_output=True, text=True, cwd=cwd,
-                          encoding="utf-8", errors="replace", env=env, timeout=timeout)
-    try:
-        payload = json.loads(proc.stdout.strip() or "{}")
-    except ValueError:
-        payload = {}
-    return proc.returncode, payload, proc.stdout, proc.stderr
+def limits(cfg):
+    """Segundos de silencio antes de avisar a Red, y corte duro opcional (None = nunca)."""
+    idle = float(os.environ.get("RED_INACTIVITY_SECONDS") or cfg.get("inactivity_min", 30) * 60)
+    hard = os.environ.get("RED_TIMEOUT_SECONDS")
+    return idle, (float(hard) if hard else None)
+
+
+def idle_reporter(path, role, task):
+    def report(seconds):
+        nota = f"sin eventos hace {seconds} s"
+        ledger(path, "inactivo", agent=role, task=task, nota=nota)
+        append_jsonl(os.path.join(path, "alerts.jsonl"),
+                     {"ts": now(), "rol": role, "tarea": task, "tipo": "inactivo", "nota": nota})
+    return report
 
 
 def execute(a, role, cfg, policy, path, prompt):
@@ -217,31 +225,32 @@ def execute(a, role, cfg, policy, path, prompt):
     resume = a.resume
     sessions_dir = os.path.join(path, "sessions")
     os.makedirs(sessions_dir, exist_ok=True)
-    timeout = float(os.environ.get("RED_TIMEOUT_SECONDS") or cfg.get("timeout_min", 60) * 60)
+    idle_s, hard_s = limits(cfg)
     for attempt in (1, 2):
-        cmd = build_cmd(role, cfg, policy, a.budget, resume, remote=bool(a.destinations))
+        cmd = build_cmd(role, cfg, policy, resume, remote=bool(a.destinations))
         ledger(path, "lanzado", agent=role, task=a.task, nota=f"intento {attempt} cwd={a.cwd}", resume=resume)
         try:
-            code, payload, raw, err = run_claude(cmd, prompt, env, a.cwd, timeout)
-        except subprocess.TimeoutExpired:
-            ledger(path, "timeout", agent=role, task=a.task, nota=f"sin respuesta en {int(timeout)} s")
-            return {"role": role, "error": f"timeout tras {int(timeout)} s"}, EXIT_FAILED
+            code, summary, _, raw, err = run_stream(resolve_claude() + cmd[1:], prompt, env, a.cwd,
+                                                    idle_s, idle_reporter(path, role, a.task), hard_s)
+        except StreamTimeout as exc:
+            ledger(path, "timeout", agent=role, task=a.task, nota=str(exc))
+            return {"role": role, "error": f"timeout: {exc}"}, EXIT_FAILED
         n = len(os.listdir(sessions_dir)) + 1
         record_file = os.path.join(sessions_dir, f"{role}-{n}.json")
         write_json(record_file, {"ts": now(), "role": role, "attempt": attempt, "exit": code, "cwd": a.cwd,
-                                 "cmd": cmd, "payload": payload, "raw": raw[-20000:], "stderr": err[-5000:]})
-        result = (payload.get("result") or "").strip()
+                                 "cmd": cmd, "payload": summary, "raw": raw[-20000:], "stderr": err[-5000:]})
+        result = summary["result"]
         if code == 0 and result:
             report = parse_report(result)
-            ledger(path, "reporte", agent=role, task=a.task, session_id=payload.get("session_id"),
-                   costo=payload.get("total_cost_usd"), archivo=record_file,
+            ledger(path, "reporte", agent=role, task=a.task, session_id=summary["session_id"],
+                   costo=summary["total_cost_usd"], archivo=record_file,
                    estado=(report or {}).get("estado") or "SIN-FORMATO")
-            return {"role": role, "session_id": payload.get("session_id"), "file": record_file,
-                    "cost_usd": payload.get("total_cost_usd"), "report": report, "result": result}, 0
+            return {"role": role, "session_id": summary["session_id"], "file": record_file,
+                    "cost_usd": summary["total_cost_usd"], "report": report, "result": result}, 0
         evento = "vacio" if code == 0 else "error"
         ledger(path, evento, agent=role, task=a.task, nota=f"exit={code} {err.strip()[-300:]}",
-               archivo=record_file)
-        resume = payload.get("session_id") or resume
+               costo=summary["total_cost_usd"], archivo=record_file)
+        resume = summary["session_id"] or resume
     return {"role": role, "error": "sin resultado tras 2 intentos", "file": record_file}, EXIT_FAILED
 
 
@@ -274,11 +283,6 @@ def validate(a, cfg):
     path = op_dir(a.op)
     if not os.path.isfile(os.path.join(path, "state.json")):
         raise Refused(EXIT_USAGE, f"operacion inexistente: {a.op} (crea una con red-op new)")
-    budget = cfg["budget_usd"] if a.budget is None else a.budget
-    if not (math.isfinite(budget) and 0 < budget <= cfg.get("max_budget_usd", cfg["budget_usd"])):
-        raise Refused(EXIT_USAGE, f"presupuesto fuera de rango (0, {cfg.get('max_budget_usd')}]: "
-                                  "subir el tope es decision del usuario")
-    a.budget = budget
     if a.resume:
         sessions = known_sessions(path)
         if a.resume not in sessions:
@@ -293,7 +297,7 @@ def validate(a, cfg):
 def main():
     p = argparse.ArgumentParser(prog="launch-operative")
     p.add_argument("role"); p.add_argument("op"); p.add_argument("brief")
-    p.add_argument("--resume"); p.add_argument("--message"); p.add_argument("--budget", type=float)
+    p.add_argument("--resume"); p.add_argument("--message")
     p.add_argument("--cwd"); p.add_argument("--dry-run", action="store_true")
     a = p.parse_args()
     policy = load_roles()
@@ -315,7 +319,7 @@ def main():
             a.role, a.op, brief, a.destinations, a.cwd)
         if a.dry_run:
             register(path, a.role, None)
-            cmd = build_cmd(a.role, cfg, policy, a.budget, a.resume, remote=bool(a.destinations))
+            cmd = build_cmd(a.role, cfg, policy, a.resume, remote=bool(a.destinations))
             print(json.dumps({"cmd": cmd, "cwd": a.cwd}, ensure_ascii=False))
             print(prompt)
             return

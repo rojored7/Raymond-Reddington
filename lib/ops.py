@@ -10,11 +10,12 @@ import json
 import os
 import re
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import (EXIT_CORRUPT, OP_STATUSES, CorruptJSON, append_jsonl, data_dir,  # noqa: E402
-                    fail, file_lock, is_terminal, ledger, now, op_dir, ops_root, project_root,
-                    read_json_strict, run, write_json)
+                    fail, file_lock, is_terminal, ledger, live_sessions, now, op_dir, ops_root,
+                    project_root, read_json_strict, run, write_json)
 
 STRIKE_TIERS = ("limpio", "rehacer", "probacion", "veto")
 ROLES = ("glen", "baz", "dembe", "kaplan", "zeng")
@@ -292,6 +293,46 @@ def cmd_list(a):
         print(f"{o['op']}  [{o.get('status')}]  {o.get('objective')}  ({o.get('project')})")
 
 
+def _read_alerts(path):
+    """Alertas de los tenientes (inactividad, etc.). Una linea ilegible no tumba la lectura."""
+    try:
+        with open(os.path.join(path, "alerts.jsonl"), encoding="utf-8") as fh:
+            lines = fh.read().splitlines()
+    except OSError:
+        return []
+    alerts = []
+    for line in lines:
+        try:
+            alerts.append(json.loads(line))
+        except ValueError:
+            alerts.append({"tipo": "ilegible", "nota": line[:200]})
+    return alerts
+
+
+def _print_alerts(alerts):
+    for x in alerts:
+        print(f"[{x.get('ts', '-')}] {x.get('rol', '-')} {x.get('tipo', '-')}: {x.get('nota', '')}")
+
+
+def cmd_alerts(a):
+    """Sin --wait lista las alertas. Con --wait (Red lo deja en segundo plano) termina cuando llega
+    una alerta nueva o cuando ya no queda ninguna sesion viva: asi la notificacion despierta a Red."""
+    path = _require_op(a.op)
+    seen = _read_alerts(path)
+    if not a.wait:
+        _print_alerts(seen)
+        return
+    while True:
+        current = _read_alerts(path)
+        if len(current) > len(seen):
+            _print_alerts(current[len(seen):])
+            return
+        if not live_sessions(path):
+            print(f"sin sesiones vivas en {a.op}: nada que vigilar")
+            return
+        time.sleep(a.interval)
+
+
 def cmd_close(a):
     path = _require_op(a.op)
     _set_state(a.op, status="complete", summary=a.summary, closed=now())
@@ -334,6 +375,8 @@ def build_parser():
     s.set_defaults(fn=cmd_worktree)
     s = sub.add_parser("show"); s.add_argument("op"); s.set_defaults(fn=cmd_show)
     s = sub.add_parser("list"); s.add_argument("--open", action="store_true"); s.set_defaults(fn=cmd_list)
+    s = sub.add_parser("alerts"); s.add_argument("op"); s.add_argument("--wait", action="store_true")
+    s.add_argument("--interval", type=float, default=5.0); s.set_defaults(fn=cmd_alerts)
     s = sub.add_parser("close"); s.add_argument("op"); s.add_argument("--summary", default="")
     s.set_defaults(fn=cmd_close)
     return p

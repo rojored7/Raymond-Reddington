@@ -127,5 +127,24 @@ bash "$R" new en-worktree >/dev/null
 assert_contains "agrega .red/ al .gitignore dentro de un worktree" "$(cat .gitignore 2>/dev/null)" ".red/"
 cd / && git -C "$W" worktree remove --force "$T/wtcheckout" 2>/dev/null
 
+# --- alertas: el canal de los tenientes hacia Red ---
+cd "$P" || exit 1
+AOP="$(bash "$R" new alertas)"; AD="$P/.red/ops/$AOP"
+assert_eq "sin alertas no imprime nada" "$(bash "$R" alerts "$AOP")" ""
+echo '{"ts": "t", "rol": "baz", "tipo": "inactivo", "nota": "sin eventos hace 1800 s"}' >> "$AD/alerts.jsonl"
+assert_contains "alerts lista las alertas" "$(bash "$R" alerts "$AOP")" "baz"
+out="$(timeout 20 bash "$R" alerts "$AOP" --wait --interval 0.2)"; rc=$?
+assert_eq "--wait sin sesiones vivas termina enseguida" "$rc" "0"
+"$PY" -c "import os,time;print(os.getpid(),flush=True);time.sleep(30)" > "$T/apid.txt" &
+ABG=$!
+for _ in $(seq 1 50); do [ -s "$T/apid.txt" ] && break; "$PY" -c "import time;time.sleep(0.1)"; done
+echo "{\"sessions\":[{\"role\":\"baz\",\"pid\":$(cat "$T/apid.txt")}]}" > "$AD/running.json"
+( "$PY" -c "import time;time.sleep(1.5)"; echo '{"ts": "t2", "rol": "baz", "tipo": "inactivo", "nota": "segunda"}' >> "$AD/alerts.jsonl" ) &
+out="$(timeout 20 bash "$R" alerts "$AOP" --wait --interval 0.2)"; rc=$?
+assert_eq "--wait despierta con una alerta nueva" "$rc" "0"
+assert_contains "--wait muestra solo la alerta nueva" "$out" "segunda"
+assert_not_contains "--wait no repite las alertas viejas" "$out" "1800"
+kill "$ABG" 2>/dev/null; wait "$ABG" 2>/dev/null
+
 cd / && rm -rf "$T"
 finish
