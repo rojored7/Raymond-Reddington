@@ -352,6 +352,59 @@ out="$(RED_FAKE_MODE=glen_writes bash "$L" glen op1 "$T/glen-init.json" 2>&1)"
 assert_eq "glen escribiendo sus documentos no es edicion directa" "$(aud ediciones_directas)" "[]"
 assert_eq "la auditoria de glen queda ok" "$(aud ok)" "True"
 
+# --- integridad: cada reporte queda anclado por hash; un reporte alterado se detecta ---
+out="$(RED_FAKE_MODE=fenced bash "$L" glen op1 "$BRIEF" 2>&1)"
+rec="$("$PY" -c "import json,sys;print(json.loads(sys.stdin.read())['file'])" <<< "$out")"
+check="$("$PY" - "$rec" <<'EOF'
+import hashlib, json, sys
+r = json.load(open(sys.argv[1], encoding="utf-8"))
+print(r.get("report_sha256") == hashlib.sha256(r["payload"]["result"].encode("utf-8")).hexdigest(), bool(r.get("red_version")))
+EOF
+)"
+assert_eq "el registro guarda el hash del reporte y la version de red-system" "$check" "True True"
+assert_contains "el ledger ancla el hash del reporte" "$(tail -1 "$OPD/ledger.jsonl")" '"report_sha256"'
+RO="$ROOT/scripts/red-op.sh"
+bash "$RO" integrity op1 >/dev/null 2>&1; assert_eq "integrity: registros intactos sale 0" "$?" "0"
+"$PY" -c "import json,sys;r=json.loads(open(sys.argv[1],encoding='utf-8').read().split('\`\`\`json')[1].split('\`\`\`')[0]);json.dump(r,open(sys.argv[2],'w'))" "$rec" "$T/rep-ok.json" 2>/dev/null || "$PY" - "$rec" "$T/rep-ok.json" <<'EOF'
+import json, re, sys
+r = json.load(open(sys.argv[1], encoding="utf-8"))
+body = r["payload"]["result"]
+m = re.search(r"\{.*\}", body, re.S)
+json.dump(json.loads(m.group(0)), open(sys.argv[2], "w"))
+EOF
+bash "$RO" integrity op1 --report "$T/rep-ok.json" >/dev/null 2>&1; assert_eq "integrity --report: copia fiel de un reporte registrado sale 0" "$?" "0"
+"$PY" -c "import json,sys;d=json.load(open(sys.argv[1]));d['tests']={'ejecutados':99};json.dump(d,open(sys.argv[2],'w'))" "$T/rep-ok.json" "$T/rep-malo.json"
+out="$(bash "$RO" integrity op1 --report "$T/rep-malo.json" 2>&1)"; rc=$?
+assert_eq "integrity --report: un reporte alterado sale 1" "$rc" "1"
+assert_contains "integrity --report: lo dice" "$out" "no coincide"
+"$PY" - "$rec" <<'EOF'
+import json, sys
+r = json.load(open(sys.argv[1], encoding="utf-8")); r["payload"]["result"] += " alterado"
+json.dump(r, open(sys.argv[1], "w", encoding="utf-8"))
+EOF
+out="$(bash "$RO" integrity op1 2>&1)"; rc=$?
+assert_eq "integrity: un registro de sesion alterado sale 1" "$rc" "1"
+assert_contains "integrity: nombra el registro alterado" "$out" "$(basename "$rec")"
+rm -f "$rec"
+
+# --- commits de una fase sin restriccion: se listan como informacion ---
+check="$("$PY" - "$ROOT/lib" "$T" <<'EOF'
+import os, subprocess, sys
+sys.path.insert(0, sys.argv[1])
+import flow_control
+repo = os.path.join(sys.argv[2], "repo-commits")
+os.makedirs(repo)
+g = lambda *a: subprocess.run(["git", "-C", repo, "-c", "user.email=t@t", "-c", "user.name=t", *a], capture_output=True, text=True)
+g("init", "-q"); open(os.path.join(repo, "a.py"), "w").write("x=1\n"); g("add", "a.py"); g("commit", "-qm", "base")
+before = flow_control.snapshot(repo)
+open(os.path.join(repo, "a.py"), "a").write("y=2\n"); g("commit", "-qam", "slice 1")
+after = flow_control.snapshot(repo)
+info = flow_control.commits_between(before, after)
+print(len(info), info[0]["archivos"] if info else None, info[0]["mensaje"] if info else None)
+EOF
+)"
+assert_eq "commits de la fase: sha, mensaje y archivos" "$check" "1 ['a.py'] slice 1"
+
 # --- los registros de sesion no guardan secretos en claro ---
 out="$(RED_FAKE_MODE=leaky bash "$L" glen op1 "$BRIEF" 2>&1)"
 rec="$("$PY" -c "import json,sys;print(json.loads(sys.stdin.read())['file'])" <<< "$out")"

@@ -34,6 +34,7 @@ bash $R/red-op.sh dest list                 destinos conocidos y su nivel
 bash $R/red-op.sh authorize <op> --dest <nombre> --roles baz,dembe --purpose "<para que>" --approved-by usuario
 bash $R/red-op.sh doc <op> --path <ruta.md> --why "<justificacion>"   un .md que no es del flujo ni del protocolo solo existe si lo justificas aqui
 bash $R/red-op.sh md-audit <op> --repo <ruta-repo> --base <sha>      .md nuevos; sale con 1 si alguno es basura (lo corre Dembe)
+bash $R/red-op.sh integrity <op> [--report <archivo>]   los reportes registrados no fueron alterados (lo corre Dembe)
 bash $R/red-op.sh alerts <op> --wait       (SIEMPRE run_in_background junto a cada teniente: te despierta si uno lleva demasiado sin actividad)
 bash $R/baseline.sh --out .red/ops/<op>/baseline.json
 bash $R/red-cost.sh status                  gasto del mes de los tenientes contra la referencia (150 USD, aviso al 80%; nada se frena)
@@ -83,7 +84,7 @@ El como lo pone el flujo: prevalidador de impacto, explorador, arquitecto, plann
    - Con la aprobacion: `red-op authorize` por cada destino aprobado. Despues no vuelves a pedir permiso salvo la seccion 9.
 6. **Ejecucion: Baz fase execute.** Estado `executing`. Reanuda la sesion de plan de Baz (`--resume`) con un brief `"phase": "execute"`: continua el flujo desde su gate hasta el final. El lanzador lo rechaza (codigo 3) si el plan vigente no esta aprobado. Baz trabaja con `--cwd` en el espacio de la operacion. Sesiones en paralelo solo si no comparten archivos ni recursos.
    - Con destino remoto: antes de que Baz toque el servidor, Glen saca el baseline remoto (solo lectura) y lo guardas como `.red/ops/<op>/baseline-<destino>.json`. El brief lleva `"destinations": ["<nombre>"]` y el baseline remoto en `inputs`.
-7. **Verificacion.** Estado `verifying`. Dembe fase verify, con los reportes de Baz, la `auditoria` del lanzador, los criterios y el plan aprobado. Nada sale sin que Dembe lo reproduzca.
+7. **Verificacion.** Estado `verifying`. Dembe fase verify, con los criterios, el plan aprobado y en `inputs.reports` los registros crudos de sesion (`.red/ops/<op>/sessions/<rol>-N.json`), nunca una copia ni un resumen tuyo: Dembe verifica su integridad con `red-op integrity`. Nada sale sin que Dembe lo reproduzca.
 8. **Cierre.** Estado `cleanup`. Kaplan, cuando no queda ninguna otra sesion viva (el lanzador lo fuerza).
 9. **Ramas y worktrees.** Pregunta al usuario por cada uno: integrar, dejarlo para revision o descartarlo. El merge y el borrado los ejecutas tu solo con su confirmacion (el hook de worktrees la pedira).
 10. **Entrega.** Escribe `.red/ops/<op>/delivery-report.json` desde ~/.claude/red/templates/delivery-report.json (ninguna seccion se borra: lo que no aplica dice `N/A - <razon>`). `close`. Al usuario: el resumen de la seccion 8.

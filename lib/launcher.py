@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import (CorruptJSON, append_jsonl, data_dir, file_lock, ledger, live_sessions,  # noqa: E402
                     now, op_dir, read_json, read_json_strict, redact, run, to_native, utf8_stdio,
                     write_json)
+from integrity import parse_report, report_hash  # noqa: E402
 from session_stream import StreamTimeout, audit_events, run_stream  # noqa: E402
 
 try:  # el control de fases depende del guard de escritura: si no carga, no se lanza a nadie
@@ -296,8 +297,10 @@ def audit_session(a, cfg, events, before):
     outside, committed, unverified = flow_control.changes_outside(
         before, after, allowed, workspace_root(a.cwd), may_delete=bool(cfg.get("may_delete")))
     required = flow_control.required_agents(a.flow_cfg, a.phase)
-    return flow_control.build_audit(audit_events(events), required, outside, committed,
-                                    coordinator=bool(cfg.get("requires_flow")), unverified=unverified)
+    commits = flow_control.commits_between(before, after)
+    return {**flow_control.build_audit(audit_events(events), required, outside, committed,
+                                    coordinator=bool(cfg.get("requires_flow")), unverified=unverified),
+            "commits_informativos": commits}
 
 
 def ledger_audit(path, role, task, audit):
@@ -317,10 +320,22 @@ RETRY_MESSAGE = ("Tu sesion anterior termino sin el reporte final. Continua dond
                  "ya hecho, y entrega SOLO el JSON del reporte.")
 
 
+def red_version():
+    """Version de red-system que audito la sesion: VERSION del instalador o HEAD del repo."""
+    try:
+        with open(os.path.join(ROOT, "VERSION"), encoding="utf-8") as fh:
+            return fh.read().strip() or "desconocida"
+    except OSError:
+        ok, out, _ = run(["git", "-C", ROOT, "rev-parse", "--short", "HEAD"], timeout=10)
+        return out.strip() if ok and out.strip() else "desconocida"
+
+
 def save_session(a, role, path, attempt, cmd, code, summary, audit, raw, err):
     sessions_dir = os.path.join(path, "sessions")
     record_file = os.path.join(sessions_dir, f"{role}-{len(os.listdir(sessions_dir)) + 1}.json")
+    sha = report_hash(summary["result"]) if summary["result"] else None
     write_json(record_file, {"ts": now(), "role": role, "phase": a.phase, "flow": a.flow_name,
+                             "red_version": red_version(), "report_sha256": sha,
                              "attempt": attempt, "exit": code, "cwd": a.cwd, "cmd": cmd, "payload": summary,
                              "auditoria": audit, "raw": redact(raw[-20000:]), "stderr": redact(err[-5000:])})
     return record_file
@@ -329,7 +344,8 @@ def save_session(a, role, path, attempt, cmd, code, summary, audit, raw, err):
 def delivered(a, role, path, summary, audit, record_file):
     report = parse_report(summary["result"])
     ledger(path, "reporte", agent=role, task=a.task, session_id=summary["session_id"],
-           costo=summary["total_cost_usd"], archivo=record_file, estado=(report or {}).get("estado") or "SIN-FORMATO")
+           costo=summary["total_cost_usd"], archivo=record_file, report_sha256=report_hash(summary["result"]),
+           estado=(report or {}).get("estado") or "SIN-FORMATO")
     return {"role": role, "phase": a.phase, "session_id": summary["session_id"], "file": record_file,
             "cost_usd": summary["total_cost_usd"], "auditoria": audit, "report": report,
             "result": summary["result"]}
@@ -366,18 +382,6 @@ def execute(a, role, cfg, policy, path, prompt):
         if resume:  # retomar la misma sesion: pedir solo el reporte, no reenviar el encargo completo
             message = RETRY_MESSAGE
     return {"role": role, "error": "sin resultado tras 2 intentos", "file": record_file}, EXIT_FAILED
-
-
-def parse_report(result):
-    """El reporte del teniente es JSON, a veces dentro de un bloque de codigo. None si no lo es."""
-    text = result.strip()
-    match = re.search(r"`{3}(?:json)?\s*(\{.*\})\s*`{3}", text, re.S)
-    candidate = match.group(1) if match else text[text.find("{"):text.rfind("}") + 1]
-    try:
-        report = json.loads(candidate)
-    except ValueError:
-        return None
-    return report if isinstance(report, dict) else None
 
 
 def known_sessions(path):

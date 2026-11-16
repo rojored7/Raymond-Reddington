@@ -117,6 +117,21 @@ def _committed_paths(before, after):
     return [p for p in out.split("\x00") if p] if ok else ["(no se pudo listar lo commiteado)"]
 
 
+def commits_between(before, after):
+    """Commits hechos durante la sesion (sha, mensaje, archivos), para informar aunque la fase permita todo."""
+    if not before or not after or "error" in before or "error" in after or before["head"] == after["head"]:
+        return []
+    ok, out, _ = run(GIT + ["-C", after["root"], "rev-list", "--reverse", f"{before['head']}..{after['head']}"],
+                     timeout=60)
+    commits = []
+    for sha in (out.split() if ok else []):
+        msg = run(GIT + ["-C", after["root"], "log", "-1", "--format=%s", sha], timeout=30)[1].strip()
+        files = run(GIT + ["-C", after["root"], "diff-tree", "--no-commit-id", "--name-only", "-r", "-z", sha],
+                    timeout=30)[1]
+        commits.append({"sha": sha[:12], "mensaje": msg, "archivos": [f for f in files.split("\x00") if f]})
+    return commits
+
+
 def changes_outside(before, after, allowed, root, may_delete=False):
     """(rutas fuera de lo permitido, hubo commits, sin_verificar) entre dos snapshots.
 

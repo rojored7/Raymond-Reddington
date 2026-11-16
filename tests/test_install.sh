@@ -24,6 +24,7 @@ ls "$C"/red/backups/*/settings.json >/dev/null 2>&1 && pass "respalda settings.j
 [ -f "$C/red/scripts/launch-operative.sh" ] && pass "instala scripts" || fail "instala scripts"
 [ -f "$C/red/hooks/red-stop-guard.sh" ] && pass "instala hooks" || fail "instala hooks"
 [ -f "$C/red/lib/common.py" ] && pass "instala lib" || fail "instala lib"
+[ -s "$C/red/VERSION" ] && pass "escribe la version instalada (VERSION)" || fail "escribe la version instalada (VERSION)"
 for f in CLAUDE.local.md prompt-init.md prompt-techdoc.md; do [ -f "$C/red/templates/protocol/$f" ] && pass "instala plantilla $f" || fail "instala plantilla $f"; done
 s="$(cat "$C/settings.json")"
 assert_eq "no impone agent red global" "$(json_get "$C/settings.json" agent)" ""

@@ -20,6 +20,7 @@ from common import (EXIT_CORRUPT, OP_STATUSES, CorruptJSON, append_jsonl, data_d
 import docs_audit  # noqa: E402
 import targets  # noqa: E402
 import approval  # noqa: E402
+import integrity  # noqa: E402
 
 STRIKE_TIERS = ("limpio", "rehacer", "probacion", "veto")
 ROLES = ("glen", "baz", "dembe", "kaplan", "zeng")
@@ -520,6 +521,7 @@ def build_parser():
     docs_audit.register(sub)
     targets.register(sub, _require_op, _set_state, _index_update)
     approval.register(sub, _require_op, _set_state, _index_update)
+    integrity.register(sub, _require_op)
     s = sub.add_parser("alerts"); s.add_argument("op"); s.add_argument("--wait", action="store_true")
     s.add_argument("--interval", type=float, default=5.0)
     s.add_argument("--after", type=int, default=None, help="alertas ya vistas (por defecto: todas las actuales)")

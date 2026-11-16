@@ -62,6 +62,16 @@ def strip_ours(settings):
     return settings
 
 
+def repo_version():
+    """Commit del repo desde el que se instala (cada sesion de teniente registra con que version corrio)."""
+    try:
+        proc = subprocess.run(["git", "-C", REPO, "describe", "--always", "--dirty"],
+                              capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        return "sin-git"
+    return proc.stdout.strip() if proc.returncode == 0 and proc.stdout.strip() else "sin-git"
+
+
 def restore_agent(settings, prev):
     """Devuelve settings con el agente que tenia el usuario antes de red-system."""
     restored = {k: v for k, v in settings.items() if k != "agent"}
@@ -104,6 +114,8 @@ def install():
         shutil.copy2(os.path.join(REPO, "agents", name), target)
     for d in CODE_DIRS:
         copy_tree(os.path.join(REPO, d), os.path.join(red, d))
+    with open(os.path.join(red, "VERSION"), "w", encoding="utf-8") as fh:
+        fh.write(repo_version() + "\n")
     os.makedirs(os.path.join(red, "templates"), exist_ok=True)
     shutil.copy2(os.path.join(REPO, "templates", "delivery-report.json"),
                  os.path.join(red, "templates", "delivery-report.json"))
