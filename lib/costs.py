@@ -14,7 +14,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from common import data_dir, read_json, read_json_strict  # noqa: E402
+from common import data_dir, read_json, read_json_strict, utf8_stdio  # noqa: E402
 
 
 def now():
@@ -128,6 +128,7 @@ def cmd_status(_a):
 
 
 def main():
+    utf8_stdio()
     p = argparse.ArgumentParser(prog="red-cost")
     sub = p.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("report")

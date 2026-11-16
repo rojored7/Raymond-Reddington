@@ -80,10 +80,11 @@ def changes_outside(before, after, allowed, root):
     return outside, before[0] != after[0]
 
 
-def build_audit(stream_audit, required, outside, committed):
+def build_audit(stream_audit, required, outside, committed, coordinator):
+    """coordinator: el rol coordina un flujo (Baz) y no debe editar; para los demas manda write_paths."""
     launched = stream_audit["agentes_lanzados"]
     missing = [a for a in required if a not in launched]
-    direct = stream_audit["ediciones_directas"]
+    direct = stream_audit["ediciones_directas"] if coordinator else []
     return {"agentes_requeridos": required, "agentes_lanzados": launched, "agentes_faltantes": missing,
             "ediciones_directas": direct, "cambios_fuera_de_fase": outside, "commits_en_fase": committed,
             "ok": not (missing or direct or outside or committed)}

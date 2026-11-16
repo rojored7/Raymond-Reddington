@@ -223,8 +223,8 @@ assert_eq "--wait sin sesiones vivas termina enseguida" "$rc" "0"
 ABG=$!
 for _ in $(seq 1 50); do [ -s "$T/apid.txt" ] && break; "$PY" -c "import time;time.sleep(0.1)"; done
 echo "{\"sessions\":[{\"role\":\"baz\",\"pid\":$(cat "$T/apid.txt")}]}" > "$AD/running.json"
-( "$PY" -c "import time;time.sleep(1.5)"; echo '{"ts": "t2", "rol": "baz", "tipo": "inactivo", "nota": "segunda"}' >> "$AD/alerts.jsonl" ) &
-out="$(timeout 20 bash "$R" alerts "$AOP" --wait --interval 0.2)"; rc=$?
+echo '{"ts": "t2", "rol": "baz", "tipo": "inactivo", "nota": "segunda"}' >> "$AD/alerts.jsonl"
+out="$(timeout 20 bash "$R" alerts "$AOP" --wait --after 1 --interval 0.2)"; rc=$?
 assert_eq "--wait despierta con una alerta nueva" "$rc" "0"
 assert_contains "--wait muestra solo la alerta nueva" "$out" "segunda"
 assert_not_contains "--wait no repite las alertas viejas" "$out" "1800"

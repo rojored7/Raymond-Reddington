@@ -20,7 +20,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import (append_jsonl, ledger, log_error, now, project_root,  # noqa: E402
-                    read_json, read_json_strict)
+                    read_json, read_json_strict, utf8_stdio)
 
 APPROVE = re.compile(r"\baprobar\s+([0-9a-f]{6})\b", re.IGNORECASE)
 
@@ -126,6 +126,7 @@ def self_test():
 
 
 def main():
+    utf8_stdio()
     if "--self-test" in sys.argv:
         sys.exit(self_test())
     try:

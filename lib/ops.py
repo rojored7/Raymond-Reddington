@@ -15,7 +15,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import (EXIT_CORRUPT, OP_STATUSES, CorruptJSON, append_jsonl, data_dir,  # noqa: E402
                     fail, file_lock, is_terminal, ledger, live_sessions, now, op_dir, ops_root,
-                    project_root, read_json_strict, run, write_json)
+                    project_root, read_json_strict, run, utf8_stdio, write_json)
 import docs_audit  # noqa: E402
 import targets  # noqa: E402
 import approval  # noqa: E402
@@ -425,6 +425,8 @@ def cmd_alerts(a):
     una alerta nueva o cuando ya no queda ninguna sesion viva: asi la notificacion despierta a Red."""
     path = _require_op(a.op)
     seen = _read_alerts(path)
+    if a.after is not None:
+        seen = seen[:a.after]
     if not a.wait:
         _print_alerts(seen)
         return
@@ -492,13 +494,16 @@ def build_parser():
     targets.register(sub, _require_op, _set_state, _index_update)
     approval.register(sub, _require_op, _set_state, _index_update)
     s = sub.add_parser("alerts"); s.add_argument("op"); s.add_argument("--wait", action="store_true")
-    s.add_argument("--interval", type=float, default=5.0); s.set_defaults(fn=cmd_alerts)
+    s.add_argument("--interval", type=float, default=5.0)
+    s.add_argument("--after", type=int, default=None, help="alertas ya vistas (por defecto: todas las actuales)")
+    s.set_defaults(fn=cmd_alerts)
     s = sub.add_parser("close"); s.add_argument("op"); s.add_argument("--summary", default="")
     s.set_defaults(fn=cmd_close)
     return p
 
 
 if __name__ == "__main__":
+    utf8_stdio()
     args = build_parser().parse_args()
     try:
         args.fn(args)

@@ -187,6 +187,10 @@ if mode == "dirty":
     open("app.py", "a").write("# cambio en fase plan\n")
     os.makedirs("outputs", exist_ok=True)
     open(os.path.join("outputs", "00b.md"), "w").write("ok\n")
+if mode == "glen_writes":
+    tool("Write", {"file_path": "CLAUDE.md"})
+    result('{"estado": "COMPLETADO", "nota": "documentacion generada, sección 2"}')
+    sys.exit(0)
 if mode == "empty_once" and n == 1:
     result("")
 else:
@@ -314,6 +318,16 @@ out="$(RED_FAKE_MODE=skip bash "$L" baz op1 "$T/bug-plan.json" 2>&1)"
 assert_contains "detecta el agente obligatorio que no corrio" "$(aud agentes_faltantes)" "code-explorer"
 assert_eq "la auditoria marca la entrega" "$(aud ok)" "False"
 assert_contains "el faltante queda en el ledger" "$(cat "$OPD/ledger.jsonl")" '"evento": "agentes-faltantes"'
+
+# --- solo el coordinador (Baz) tiene prohibido editar: Glen en init escribe sus documentos ---
+sed 's/"task":"t1"/"task":"t1","phase":"init"/' "$BRIEF" > "$T/glen-init.json"
+out="$(RED_FAKE_MODE=glen_writes bash "$L" glen op1 "$T/glen-init.json" 2>&1)"
+assert_eq "glen escribiendo sus documentos no es edicion directa" "$(aud ediciones_directas)" "[]"
+assert_eq "la auditoria de glen queda ok" "$(aud ok)" "True"
+
+# --- la salida del lanzador es UTF-8 aunque la consola de Windows sea cp1252 ---
+RED_FAKE_MODE=glen_writes bash "$L" glen op1 "$T/glen-init.json" > "$T/utf8.out" 2>/dev/null
+assert_eq "la salida se decodifica como UTF-8" "$("$PY" -c "import sys;t=open(sys.argv[1],'rb').read().decode('utf-8');print('ok' if 'sección' in t else 'no')" "$T/utf8.out" 2>&1)" "ok"
 
 # --- fase plan: nada fuera de los artefactos del flujo ---
 G2="$T/repos/plan"; mkdir -p "$G2"; git init -q -b main "$G2"; echo "x = 1" > "$G2/app.py"

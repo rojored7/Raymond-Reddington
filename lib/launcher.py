@@ -21,7 +21,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import (CorruptJSON, append_jsonl, data_dir, file_lock, ledger, live_sessions,  # noqa: E402
-                    now, op_dir, read_json, read_json_strict, run, to_native, write_json)
+                    now, op_dir, read_json, read_json_strict, run, to_native, utf8_stdio, write_json)
 import flow_control  # noqa: E402
 from session_stream import StreamTimeout, audit_events, run_stream  # noqa: E402
 from write_guard import workspace_root  # noqa: E402
@@ -264,7 +264,8 @@ def audit_session(a, cfg, events, before):
     after = flow_control.snapshot(a.cwd) if before is not None else None
     outside, committed = flow_control.changes_outside(before, after, allowed, workspace_root(a.cwd))
     required = flow_control.required_agents(a.flow_cfg, a.phase)
-    return flow_control.build_audit(audit_events(events), required, outside, committed)
+    return flow_control.build_audit(audit_events(events), required, outside, committed,
+                                    coordinator=bool(cfg.get("requires_flow")))
 
 
 def ledger_audit(path, role, task, audit):
@@ -357,6 +358,7 @@ def validate(a, cfg):
 
 
 def main():
+    utf8_stdio()
     p = argparse.ArgumentParser(prog="launch-operative")
     p.add_argument("role"); p.add_argument("op"); p.add_argument("brief")
     p.add_argument("--resume"); p.add_argument("--message")

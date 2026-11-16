@@ -225,6 +225,13 @@ def run(cmd, cwd=None, timeout=30):
     return True, proc.stdout, None
 
 
+def utf8_stdio():
+    """Salida en UTF-8 siempre. En Windows la consola es cp1252 y quien lee la salida espera UTF-8."""
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
+
 def fail(message, code=2):
     print(message, file=sys.stderr)
     sys.exit(code)
