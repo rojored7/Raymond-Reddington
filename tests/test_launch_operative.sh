@@ -23,7 +23,10 @@ assert_contains "dry-run usa permission-mode auto" "$out" '"--permission-mode", 
 assert_contains "dry-run pide salida en streaming" "$out" '"--output-format", "stream-json"'
 assert_contains "stream-json va con --verbose" "$out" '"--verbose"'
 assert_not_contains "sin tope de presupuesto por sesion" "$out" 'max-budget-usd'
-assert_contains "dembe tiene Edit prohibido" "$out" 'Edit'
+assert_contains "dembe sigue sin NotebookEdit" "$out" '"NotebookEdit"'
+assert_contains "inyecta el guard de escritura con --settings" "$out" '"--settings"'
+assert_contains "el guard inyectado es red-write-guard" "$out" 'red-write-guard.sh'
+assert_contains "el prompt declara la fase por defecto" "$out" 'Fase: verify'
 assert_contains "bloqueo comun: git push" "$out" 'Bash(git push:*)'
 assert_contains "bloqueo comun: --no-verify" "$out" 'no-verify'
 assert_contains "bloqueo comun: PowerShell" "$out" '"PowerShell"'
@@ -37,6 +40,10 @@ assert_contains "resume arma --resume" "$(dry baz op1 "$BRIEF" --resume abc-123 
 assert_contains "prohibiciones en out_of_scope no rechazan el brief" "$(dry glen op1 "$BRIEF"; echo "rc=$?")" "rc=0"
 
 bash "$L" nadie op1 "$BRIEF" --dry-run >/dev/null 2>&1; assert_eq "rol desconocido falla" "$?" "2"
+sed 's/"task":"t1"/"task":"t1","phase":"inventada"/' "$BRIEF" > "$T/fase-mala.json"
+bash "$L" baz op1 "$T/fase-mala.json" --dry-run >/dev/null 2>&1; assert_eq "fase invalida para el rol falla" "$?" "2"
+sed 's/"task":"t1"/"task":"t1","phase":"init"/' "$BRIEF" > "$T/fase-init.json"
+assert_contains "glen en fase init" "$(dry glen op1 "$T/fase-init.json")" "Fase: init"
 bash "$L" baz "../../x" "$BRIEF" --dry-run >/dev/null 2>&1; assert_eq "op con traversal se rechaza" "$?" "2"
 bash "$L" baz op-inexistente "$BRIEF" --dry-run >/dev/null 2>&1; assert_eq "op sin state.json se rechaza" "$?" "2"
 bash "$L" baz op1 "$BRIEF" --resume 'x;rm' --message m --dry-run >/dev/null 2>&1; assert_eq "resume con caracteres invalidos se rechaza" "$?" "2"
@@ -174,6 +181,7 @@ out="$(bash "$L" glen op1 "$BRIEF" 2>&1)"; rc=$?
 assert_eq "ejecucion real termina en 0" "$rc" "0"
 assert_contains "devuelve el session_id" "$out" "s-1"
 assert_contains "pasa RED_ROLE a la sesion" "$out" "role=glen"
+assert_contains "pasa RED_PHASE (fase por defecto del rol)" "$(cat "$T/count.env")" '"RED_PHASE": "investigate"'
 ls "$OPD"/sessions/glen-*.json >/dev/null 2>&1 && pass "guarda la sesion en sessions/" || fail "guarda la sesion en sessions/"
 assert_contains "registra lanzado en el ledger" "$(cat "$OPD/ledger.jsonl")" '"evento": "lanzado"'
 assert_contains "registra reporte en el ledger" "$(cat "$OPD/ledger.jsonl")" '"evento": "reporte"'

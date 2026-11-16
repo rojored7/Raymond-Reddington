@@ -69,6 +69,7 @@ assert_contains "check avisa si agent=red quedo global" "$out" "agent=red global
 
 out="$(bash "$I" --check 2>&1)"; assert_eq "check sin diferencias termina en 0" "$?" "0"
 assert_contains "check corre los self-test de los hooks" "$out" "self-test"
+assert_contains "check corre el self-test del write guard" "$out" "red-write-guard.sh: self-test ok"
 echo "cambio" >> "$C/agents/glen.md"
 out="$(bash "$I" --check 2>&1)"; rc=$?
 assert_eq "check con diferencias termina en 1" "$rc" "1"

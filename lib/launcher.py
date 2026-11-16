@@ -120,8 +120,27 @@ def check_workspace(cfg, path, cwd):
                              "(o un worktree justificado con red-op worktree --why)")
 
 
-def render_prompt(role, op, brief, destinations, cwd):
+def resolve_phase(role, cfg, brief):
+    """Fase del encargo: la del brief o la primera del rol. Define donde puede escribir (write_paths)."""
+    phases = list(cfg.get("write_paths") or {})
+    if not phases:
+        raise Refused(EXIT_USAGE, f"{role} no tiene fases definidas en roles.json")
+    phase = brief.get("phase") or phases[0]
+    if phase not in phases:
+        raise Refused(EXIT_USAGE, f"fase '{phase}' invalida para {role}. Fases: {', '.join(phases)}")
+    return phase
+
+
+def guard_settings():
+    """Hook de escritura inyectado en cada teniente: no depende de la instalacion global."""
+    hook = os.path.join(ROOT, "hooks", "red-write-guard.sh").replace(os.sep, "/")
+    return json.dumps({"hooks": {"PreToolUse": [{"matcher": "Edit|Write|MultiEdit|NotebookEdit",
+                                                 "hooks": [{"type": "command", "command": f'bash "{hook}"'}]}]}})
+
+
+def render_prompt(role, op, brief, destinations, cwd, phase):
     lines = [f"ENCARGO DE RED  operacion={op}  tarea={brief.get('task', '-')}  rol={role}",
+             f"Fase: {phase}",
              f"Directorio de la operacion: {op_dir(op)}",
              f"Directorio de trabajo: {cwd}",
              f"Objetivo: {brief.get('objective', '')}",
@@ -148,7 +167,7 @@ def render_prompt(role, op, brief, destinations, cwd):
 def build_cmd(role, cfg, policy, resume, remote=False):
     cmd = ["claude", "-p", "--agent", role, "--model", cfg["model"],
            "--permission-mode", cfg.get("permission_mode", "auto"),
-           "--output-format", "stream-json", "--verbose"]
+           "--output-format", "stream-json", "--verbose", "--settings", guard_settings()]
     if resume:
         cmd += ["--resume", resume]
     if cfg.get("allowed"):
@@ -231,7 +250,7 @@ def idle_reporter(path, role, task):
 
 
 def execute(a, role, cfg, policy, path, prompt):
-    env = dict(os.environ, RED_ROLE=role, RED_OP=a.op, RED_OP_DIR=path)
+    env = dict(os.environ, RED_ROLE=role, RED_PHASE=a.phase, RED_OP=a.op, RED_OP_DIR=path)
     resume = a.resume
     sessions_dir = os.path.join(path, "sessions")
     os.makedirs(sessions_dir, exist_ok=True)
@@ -319,6 +338,7 @@ def main():
         if not isinstance(brief, dict):
             raise Refused(EXIT_USAGE, f"brief ilegible: {a.brief}")
         a.task = brief.get("task")
+        a.phase = resolve_phase(a.role, cfg, brief)
         path = validate(a, cfg)
         a.destinations = resolve_destinations(a.role, brief, path)
         why = forbidden_reason(brief, policy, bool(a.destinations))
@@ -326,7 +346,7 @@ def main():
             raise Refused(EXIT_FORBIDDEN, f"brief rechazado ({why}): requiere autorizacion del usuario")
         check_workspace(cfg, path, a.cwd)
         prompt = a.message if a.resume and a.message else render_prompt(
-            a.role, a.op, brief, a.destinations, a.cwd)
+            a.role, a.op, brief, a.destinations, a.cwd, a.phase)
         if a.dry_run:
             register(path, a.role, None)
             cmd = build_cmd(a.role, cfg, policy, a.resume, remote=bool(a.destinations))

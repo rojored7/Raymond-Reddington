@@ -131,7 +131,7 @@ def install():
 
 def self_tests(red):
     lines, ok = [], True
-    for script in ("guard-worktree-deletion.sh", "red-stop-guard.sh"):
+    for script in ("guard-worktree-deletion.sh", "red-stop-guard.sh", "red-write-guard.sh"):
         path = os.path.join(red, "hooks", script).replace(os.sep, "/")
         try:
             bash = os.environ.get("RED_BASH") or "bash"  # el bash de Git, no el de WSL

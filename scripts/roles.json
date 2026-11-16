@@ -54,17 +54,30 @@
       "inactivity_min": 15,
       "writes_code": false,
       "disallowed": [
-        "Edit",
-        "Write",
         "NotebookEdit"
-      ]
+      ],
+      "write_paths": {
+        "investigate": [],
+        "init": [
+          "CLAUDE.md",
+          "TECHNICAL_DOCUMENTATION.md",
+          "CLAUDE.local.md"
+        ]
+      }
     },
     "baz": {
       "model": "opus",
       "permission_mode": "auto",
       "inactivity_min": 30,
       "writes_code": true,
-      "disallowed": []
+      "disallowed": [],
+      "write_paths": {
+        "plan": [
+          "outputs/**",
+          ".project-state/**"
+        ],
+        "execute": "*"
+      }
     },
     "dembe": {
       "model": "opus",
@@ -72,10 +85,16 @@
       "inactivity_min": 20,
       "writes_code": false,
       "disallowed": [
-        "Edit",
-        "Write",
         "NotebookEdit"
-      ]
+      ],
+      "write_paths": {
+        "verify": [
+          "@lecciones"
+        ],
+        "retro": [
+          "@lecciones"
+        ]
+      }
     },
     "kaplan": {
       "model": "sonnet",
@@ -89,7 +108,10 @@
         "Bash(git reset --hard:*)",
         "Bash(git clean:*)",
         "Bash(git branch -D:*)"
-      ]
+      ],
+      "write_paths": {
+        "cleanup": []
+      }
     },
     "zeng": {
       "model": "haiku",
@@ -104,7 +126,10 @@
       ],
       "allowed": [
         "Bash(bash ~/.claude/red/scripts/red-cost.sh:*)"
-      ]
+      ],
+      "write_paths": {
+        "report": []
+      }
     }
   }
 }
