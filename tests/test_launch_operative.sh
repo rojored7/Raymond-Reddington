@@ -82,7 +82,7 @@ sed 's/qa-app/qa-ejemplo/' "$T/qa.json" > "$T/ej.json"
 bash "$L" baz op1 "$T/ej.json" --dry-run >/dev/null 2>&1; assert_eq "destino de ejemplo se rechaza" "$?" "3"
 assert_contains "sin destinos ssh sigue prohibido" "$(dry baz op1 "$BRIEF")" '"Bash(ssh:*)"'
 
-# --- worktree obligatorio para escribir codigo ---
+# --- espacio de trabajo: worktree registrado o checkout principal en la rama de la operacion ---
 G="$T/repos/app"; mkdir -p "$G"; git init -q -b main "$G"; git -C "$G" -c user.email=t@t -c user.name=t commit -q --allow-empty -m i
 git -C "$G" worktree add -q -b feat/x "$T/repos/worktrees/app-x" 2>/dev/null
 WTN="$("$PY" -c "import os,sys;print(os.path.normpath(sys.argv[1]))" "$T/repos/worktrees/app-x")"
@@ -92,12 +92,26 @@ p, wt, repo = sys.argv[1:]
 d = json.load(open(p)); d["worktrees"] = [{"repo": repo, "path": wt, "branch": "feat/x"}]
 json.dump(d, open(p, "w"))
 EOF
-bash "$L" baz op1 "$BRIEF" --cwd "$G" --dry-run >/dev/null 2>&1; assert_eq "baz en el checkout principal se rechaza" "$?" "4"
+bash "$L" baz op1 "$BRIEF" --cwd "$G" --dry-run >/dev/null 2>&1; assert_eq "baz en un checkout sin rama registrada se rechaza" "$?" "4"
 bash "$L" baz op1 "$BRIEF" --cwd "$T/repos/worktrees/app-x" --dry-run >/dev/null 2>&1; assert_eq "baz en el worktree de la operacion arranca" "$?" "0"
 bash "$L" dembe op1 "$BRIEF" --cwd "$G" --dry-run >/dev/null 2>&1; assert_eq "dembe (solo lectura) puede leer el checkout principal" "$?" "0"
 mkdir -p "$T/nogit"
 bash "$L" baz op1 "$BRIEF" --cwd "$T/nogit" --dry-run >/dev/null 2>&1; assert_eq "baz fuera de git arranca" "$?" "0"
 git -C "$G" worktree remove --force "$T/repos/worktrees/app-x" 2>/dev/null
+GN="$("$PY" -c "import os,sys;print(os.path.normpath(sys.argv[1]))" "$G")"
+git -C "$G" switch -q -c feat/z
+"$PY" - "$OPD/state.json" "$GN" <<'EOF'
+import json, sys
+p, repo = sys.argv[1:]
+d = json.load(open(p)); d["worktrees"] = []; d["branches"] = [{"repo": repo, "branch": "feat/z"}]
+json.dump(d, open(p, "w"))
+EOF
+bash "$L" baz op1 "$BRIEF" --cwd "$G" --dry-run >/dev/null 2>&1; assert_eq "baz en el checkout principal en la rama de la operacion arranca" "$?" "0"
+git -C "$G" switch -q main
+out="$(bash "$L" baz op1 "$BRIEF" --cwd "$G" --dry-run 2>&1)"; rc=$?
+assert_eq "baz en el checkout principal en otra rama se rechaza" "$rc" "4"
+assert_contains "el rechazo nombra la rama esperada" "$out" "feat/z"
+echo '{"op":"op1","status":"executing"}' > "$OPD/state.json"
 
 # --- exclusion con running.json ---
 "$PY" -c "import os,time;print(os.getpid(),flush=True);time.sleep(60)" > "$T/pid.txt" &

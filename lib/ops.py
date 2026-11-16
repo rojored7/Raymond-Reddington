@@ -81,7 +81,7 @@ def cmd_new(a):
     os.makedirs(path)
     write_json(os.path.join(path, "state.json"), {
         "op": op_id, "status": "intake", "objective": a.objective, "route": a.route,
-        "worktrees": [], "created": now(), "updated": now()})
+        "branches": [], "worktrees": [], "created": now(), "updated": now()})
     write_json(os.path.join(path, "tracker.json"), {"op": op_id, "tasks": []})
     ledger(path, "creada", op=op_id, nota=a.objective)
     _index_update(op_id, objective=a.objective, status="intake")
@@ -233,34 +233,135 @@ def _branch_exists(repo, branch):
     return run(["git", "-C", repo, "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"])[0]
 
 
-def cmd_worktree(a):
+def _repo_top(repo):
+    return os.path.normpath(run(["git", "-C", repo, "rev-parse", "--show-toplevel"])[1].strip() or repo)
+
+
+def _new_branch_name(repo, kind, op_id, explicit):
+    """Rama nueva de la operacion. Una rama que ya existe y no es de esta operacion no se reusa."""
+    if explicit:
+        if _branch_exists(repo, explicit):
+            fail(f"la rama {explicit} ya existe y no es de esta operacion: no se reusa ni se cambia", EXIT_BUSY)
+        return explicit
+    slug, n = _slug_of(op_id), 1
+    branch = f"{kind}/{slug}"
+    while _branch_exists(repo, branch):
+        n += 1
+        branch = f"{kind}/{slug}-{n}"
+    return branch
+
+
+def _registered(state, key, repo):
+    return next((w for w in state.get(key, []) if os.path.normcase(w["repo"]) == os.path.normcase(repo)), None)
+
+
+def _only_red_gitignore(repo):
+    """El .gitignore cuenta como cambio de Red si lo unico agregado es la linea .red/."""
+    ok, diff, _ = run(["git", "-C", repo, "diff", "HEAD", "--", ".gitignore"])
+    if ok and diff.strip():
+        changed = [ln for ln in diff.splitlines() if ln[:1] in "+-" and ln[:3] not in ("+++", "---")]
+        return changed == ["+.red/"]
+    try:
+        with open(os.path.join(repo, ".gitignore"), encoding="utf-8") as fh:
+            return [ln for ln in fh.read().splitlines() if ln.strip()] == [".red/"]
+    except OSError:
+        return False
+
+
+def _foreign_changes(repo):
+    """Cambios sin commitear que no son de Red: con ellos no se cambia de rama en el checkout."""
+    out = run(["git", "-C", repo, "status", "--porcelain"])[1]
+    paths = [ln[3:].strip() for ln in out.splitlines() if ln.strip()]
+    return [p for p in paths if not (p == ".gitignore" and _only_red_gitignore(repo))]
+
+
+def cmd_branch(a):
+    """Modo por defecto: la operacion trabaja en una rama propia del checkout principal."""
     path = _require_op(a.op)
-    repo = os.path.normpath(run(["git", "-C", a.repo, "rev-parse", "--show-toplevel"])[1].strip() or a.repo)
+    repo = _repo_top(a.repo)
+    mine = _registered(read_json_strict(os.path.join(path, "state.json")), "branches", repo)
+    if mine:
+        print(mine["branch"])
+        return
+    dirty = _foreign_changes(repo)
+    if dirty:
+        fail("el checkout principal tiene cambios sin commitear que no son de Red ("
+             + ", ".join(dirty[:5]) + "): commitealos, o justifica un worktree con red-op worktree --why",
+             EXIT_BUSY)
+    base = run(["git", "-C", repo, "branch", "--show-current"])[1].strip()
+    branch = _new_branch_name(repo, a.kind, a.op, a.branch)
+    ok, _, err = run(["git", "-C", repo, "switch", "-c", branch], timeout=60)
+    if not ok:
+        fail(f"no se pudo crear la rama: {err}", EXIT_BUSY)
+
+    def mutate(st):
+        st.setdefault("branches", []).append({"repo": repo, "branch": branch, "base": base, "created": now()})
+    _update_json(os.path.join(path, "state.json"), None, mutate)
+    ledger(path, "rama", nota=f"{branch} en {repo} (desde {base})")
+    print(branch)
+
+
+COMPOSE_FILES = ("docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml")
+
+
+def _warn(message):
+    print(f"[red-op] AVISO: {message}", file=sys.stderr)
+
+
+def _prepare_compose(repo, wt):
+    """Un worktree con compose levantaria un segundo stack con el mismo nombre de proyecto y sin .env
+    (esta en .gitignore). Se fija un COMPOSE_PROJECT_NAME propio y se copia el .env, avisando."""
+    found = [f for f in COMPOSE_FILES if os.path.isfile(os.path.join(repo, f))]
+    if not found:
+        return None
+    project = re.sub(r"[^a-z0-9_-]+", "-", os.path.basename(wt).lower()).strip("-")
+    env_src, env_dst = os.path.join(repo, ".env"), os.path.join(wt, ".env")
+    if not run(["git", "-C", wt, "check-ignore", "-q", ".env"])[0]:
+        _warn(f".env no esta en .gitignore: no se copia al worktree. Exporta COMPOSE_PROJECT_NAME={project} "
+              "antes de usar docker compose ahi")
+        return project
+    content = ""
+    if os.path.isfile(env_src):
+        with open(env_src, encoding="utf-8", errors="replace") as fh:
+            content = fh.read()
+        _warn(f".env copiado al worktree {wt}: es configuracion local, git lo ignora; Kaplan lo lista al cerrar")
+    with open(env_dst, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(content + ("" if not content or content.endswith("\n") else "\n")
+                 + f"COMPOSE_PROJECT_NAME={project}\n")
+    ports = set()
+    for f in found:
+        with open(os.path.join(repo, f), encoding="utf-8", errors="replace") as fh:
+            ports.update(re.findall(r"""["'\s-](\d{2,5}):\d{2,5}""", fh.read()))
+    if ports:
+        _warn(f"puertos fijos en {', '.join(found)}: {', '.join(sorted(ports))}. Chocaran con el stack del "
+              "checkout principal si esta arriba: revisa puertos libres antes de levantar nada")
+    return project
+
+
+def cmd_worktree(a):
+    """Solo cuando el trabajo lo justifica (escritores en paralelo, experimento descartable, cambios
+    ajenos sin commitear en el checkout). La justificacion queda registrada como decision."""
+    path = _require_op(a.op)
+    repo = _repo_top(a.repo)
     state = read_json_strict(os.path.join(path, "state.json"))
-    mine = next((w for w in state.get("worktrees", []) if os.path.normcase(w["repo"]) == os.path.normcase(repo)), None)
+    mine = _registered(state, "worktrees", repo)
     if mine and os.path.isdir(mine["path"]) and (not a.branch or a.branch == mine["branch"]):
         print(mine["path"])
         return
+    branch = _new_branch_name(repo, a.kind, a.op, a.branch)
     name = os.path.basename(repo)
-    if a.branch:
-        if _branch_exists(repo, a.branch):
-            fail(f"la rama {a.branch} ya existe y no es de esta operacion: no se reusa ni se cambia", EXIT_BUSY)
-        branch = a.branch
-    else:
-        slug, n = _slug_of(a.op), 1
-        branch = f"{a.kind}/{slug}"
-        while _branch_exists(repo, branch):
-            n += 1
-            branch = f"{a.kind}/{slug}-{n}"
     wt = os.path.join(os.path.dirname(repo), "worktrees", f"{name}-{branch.split('/', 1)[-1].replace('/', '-')}")
     ok, _, err = run(["git", "-C", repo, "worktree", "add", "-b", branch, wt], timeout=60)
     if not ok:
         fail(f"no se pudo crear el worktree: {err}", EXIT_BUSY)
     wt = os.path.normpath(wt)
+    compose = _prepare_compose(repo, wt)
 
     def mutate(st):
-        st.setdefault("worktrees", []).append({"repo": repo, "path": wt, "branch": branch, "created": now()})
+        st.setdefault("worktrees", []).append({"repo": repo, "path": wt, "branch": branch, "why": a.why,
+                                               "compose_project": compose, "created": now()})
     _update_json(os.path.join(path, "state.json"), None, mutate)
+    _decide(path, f"worktree {branch} en {wt}", a.why, "rama en el checkout principal (red-op branch)", "red")
     ledger(path, "worktree", nota=f"{branch} en {wt}")
     print(wt)
 
@@ -270,8 +371,10 @@ def cmd_show(a):
     state = read_json_strict(os.path.join(path, "state.json"))
     print(f"OPERACION {a.op}  estado={state['status']}  ruta={state.get('route')}")
     print(f"objetivo: {state.get('objective')}")
+    for b in state.get("branches", []):
+        print(f"  rama {b['branch']} en {b['repo']} (checkout principal)")
     for w in state.get("worktrees", []):
-        print(f"  worktree {w['branch']} -> {w['path']}")
+        print(f"  worktree {w['branch']} -> {w['path']}  porque: {w.get('why', '-')}")
     for t in read_json_strict(os.path.join(path, "tracker.json"), {"tasks": []})["tasks"]:
         print(f"  tarea {t['id']} [{t['status']}] {t['description']} ({t.get('owner')})")
     auth = read_json_strict(os.path.join(path, "authorizations.json"), {"destinations": []})
@@ -370,8 +473,12 @@ def build_parser():
     s = sub.add_parser("authorize"); s.add_argument("op"); s.add_argument("--dest", required=True)
     s.add_argument("--roles", required=True); s.add_argument("--purpose", required=True)
     s.add_argument("--approved-by", required=True); s.set_defaults(fn=cmd_authorize)
+    s = sub.add_parser("branch"); s.add_argument("op"); s.add_argument("--repo", required=True)
+    s.add_argument("--kind", choices=("feat", "fix"), default="feat"); s.add_argument("--branch")
+    s.set_defaults(fn=cmd_branch)
     s = sub.add_parser("worktree"); s.add_argument("op"); s.add_argument("--repo", required=True)
     s.add_argument("--kind", choices=("feat", "fix"), default="feat"); s.add_argument("--branch")
+    s.add_argument("--why", required=True, help="justificacion: por que esta operacion necesita worktree")
     s.set_defaults(fn=cmd_worktree)
     s = sub.add_parser("show"); s.add_argument("op"); s.set_defaults(fn=cmd_show)
     s = sub.add_parser("list"); s.add_argument("--open", action="store_true"); s.set_defaults(fn=cmd_list)

@@ -25,7 +25,8 @@ bash $R/red-op.sh log <op> <evento> --agent <a> --task <t> --note "<n>"
 bash $R/red-op.sh strike <agente> <tipo-tarea> <op> --reason "<r>"   -> rehacer|probacion|veto
 bash $R/red-op.sh standing <agente> <tipo-tarea>
 bash $R/red-op.sh show <op> | list [--open] | close <op> --summary "<s>"
-bash $R/red-op.sh worktree <op> --repo <ruta-repo> [--kind feat|fix]   -> imprime la ruta del worktree
+bash $R/red-op.sh branch <op> --repo <ruta-repo> [--kind feat|fix]   -> rama de la operacion en el checkout principal (por defecto)
+bash $R/red-op.sh worktree <op> --repo <ruta-repo> --why "<justificacion>" [--kind feat|fix]   -> solo si se justifica
 bash $R/red-op.sh dest list                 destinos conocidos y su nivel
 bash $R/red-op.sh authorize <op> --dest <nombre> --roles baz,dembe --purpose "<para que>" --approved-by usuario
 bash $R/baseline.sh --out .red/ops/<op>/baseline.json
@@ -41,7 +42,7 @@ Codigos del lanzador:
 | 0 | ok |
 | 2 | entrada invalida: rol, operacion inexistente, `--resume` ajeno |
 | 3 | prohibido: produccion, push, destino nivel 3 o destino no autorizado. Eso lo decide el usuario |
-| 4 | ocupado (exclusion) o Baz fuera de un worktree de la operacion |
+| 4 | ocupado (exclusion), o Baz fuera del espacio de la operacion (su rama en el checkout o su worktree) |
 | 5 | sin resultado tras 2 intentos, o corte duro (solo si RED_TIMEOUT_SECONDS esta definido) |
 
 Solo tu escribes state.json, tracker.json, authorizations.json, decisions.jsonl y los briefs. Los tenientes devuelven reportes; tu los registras.
@@ -64,15 +65,15 @@ Registra la ruta con `decide`. Si en medio del trabajo resulta ser otra clase de
 
 # 5. Ciclo de una operacion (rutas hotfix, implement, full, new-project)
 1. **Recepcion.** Reformula el objetivo y la condicion de hecho verificable. Si falta algo que solo el usuario sabe, pregunta una vez y en bloque con AskUserQuestion. Nunca supongas producto, modelo ni compatibilidades.
-2. **Operacion.** `red-op new`, `decide` (ruta), `baseline.sh`. Si hay codigo: `red-op worktree` por cada repo que se va a cambiar (misma rama en todos). El checkout principal queda en main y nadie escribe ahi.
+2. **Operacion.** `red-op new`, `decide` (ruta), `baseline.sh`. Si hay codigo: `red-op branch` por cada repo que se va a cambiar (respeta las reglas de ramas del proyecto). Worktree SOLO si el trabajo lo justifica: varios escritores en paralelo sobre el mismo repo, un experimento que probablemente se descarte, o cambios ajenos sin commitear en el checkout. Una feature nueva no es razon suficiente. La justificacion va en `--why` y queda como decision.
 3. **Inteligencia.** Glen (en paralelo con impact-prevalidator si hay codigo).
 4. **Plan.** Tareas con `task add` y dependencias que nombran el artefacto que consumen (una dependencia que no puede nombrarlo se borra). En la ruta full: planner + plan-critic.
 5. **Gate humano unico.** Plan corto, riesgos, costo estimado y lo que necesitas del usuario. Si el trabajo requiere servidores, nombra quien, donde y para que ("Baz y Dembe en <destino-qa>: desplegar la rama y verificar health; Kaplan: limpiar los contenedores temporales"). Estado `awaiting-approval`. Ejecutas solo con aprobacion; con ella, `red-op authorize` por cada destino aprobado. Despues no vuelves a pedir permiso salvo la seccion 9.
-6. **Ejecucion.** Estado `executing`. Baz para trabajo con volumen, siempre con `--cwd <worktree>`; tareas cortas inline (tambien dentro del worktree). Sesiones en paralelo solo si no comparten archivos ni recursos.
+6. **Ejecucion.** Estado `executing`. Baz con `--cwd` en el espacio de la operacion (la raiz del repo en su rama, o el worktree si se justifico). Sesiones en paralelo solo si no comparten archivos ni recursos.
    - Con destino remoto: antes de que Baz toque el servidor, Glen saca el baseline remoto (solo lectura) y lo guardas como `.red/ops/<op>/baseline-<destino>.json`. El brief lleva `"destinations": ["<nombre>"]` y el baseline remoto en `inputs`.
 7. **Verificacion.** Estado `verifying`. Dembe, con los reportes y los criterios.
 8. **Cierre.** Estado `cleanup`. Kaplan, cuando no queda ninguna otra sesion viva (el lanzador lo fuerza).
-9. **Worktrees.** Pregunta al usuario por cada uno: integrar a main, dejarlo para revision o descartarlo. El merge y el borrado los ejecutas tu solo con su confirmacion (el hook de worktrees la pedira).
+9. **Ramas y worktrees.** Pregunta al usuario por cada uno: integrar, dejarlo para revision o descartarlo. El merge y el borrado los ejecutas tu solo con su confirmacion (el hook de worktrees la pedira).
 10. **Entrega.** Escribe `.red/ops/<op>/delivery-report.json` desde ~/.claude/red/templates/delivery-report.json (ninguna seccion se borra: lo que no aplica dice `N/A - <razon>`). `close`. Al usuario: el resumen de la seccion 8.
 
 Ejecucion autonoma: un mensaje de una linea por paso y sigues en el mismo turno. Solo te detienes por una decision del usuario, por una accion hacia afuera o por un bloqueo que sobrevivio 3 hipotesis; en ese caso estado `blocked - <que>`. El hook red-stop-guard no te deja cerrar el turno con trabajo pendiente salvo que haya un teniente corriendo (su notificacion te reanuda).

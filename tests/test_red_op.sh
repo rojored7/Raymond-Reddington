@@ -98,27 +98,64 @@ bash "$R" dest add --name malo --host x --level 7 >/dev/null 2>&1; assert_eq "ni
 bash "$R" dest remove --name qa-nuevo; assert_not_contains "dest remove lo quita" "$(bash "$R" dest list)" "qa-nuevo"
 bash "$R" dest remove --name no-existe >/dev/null 2>&1; assert_eq "quitar uno inexistente falla" "$?" "2"
 
-# --- worktrees por operacion ---
+# --- worktrees por operacion (opcionales y justificados) ---
 G="$T/repos/app"; mkdir -p "$G"; git init -q -b main "$G"; git -C "$G" -c user.email=t@t -c user.name=t commit -q --allow-empty -m i
-WTP="$(bash "$R" worktree "$OP2" --repo "$G" --kind feat)"; rc=$?
+bash "$R" worktree "$OP2" --repo "$G" --kind feat >/dev/null 2>&1; assert_eq "worktree sin --why se rechaza" "$?" "2"
+WTP="$(bash "$R" worktree "$OP2" --repo "$G" --kind feat --why "dos escritores en paralelo")"; rc=$?
 assert_eq "crea el worktree" "$rc" "0"
 [ -d "$WTP" ] && pass "el worktree existe en disco" || fail "el worktree existe en disco" "$WTP"
 assert_contains "worktree en ../worktrees/<repo>-<slug>" "$WTP" "worktrees"
 assert_contains "rama feat/<slug>" "$(git -C "$WTP" branch --show-current)" "feat/"
 assert_eq "el checkout principal sigue en main" "$(git -C "$G" branch --show-current)" "main"
 assert_contains "registrado en state.json" "$(cat "$P/.red/ops/$OP2/state.json")" "worktrees"
-assert_eq "pedirlo de nuevo devuelve el mismo" "$(bash "$R" worktree "$OP2" --repo "$G" --kind feat)" "$WTP"
+assert_contains "guarda la justificacion" "$(cat "$P/.red/ops/$OP2/state.json")" "dos escritores en paralelo"
+assert_contains "la justificacion queda como decision" "$(cat "$P/.red/ops/$OP2/decisions.jsonl")" "dos escritores en paralelo"
+assert_eq "pedirlo de nuevo devuelve el mismo" "$(bash "$R" worktree "$OP2" --repo "$G" --kind feat --why "dos escritores en paralelo")" "$WTP"
 OP3="$(bash "$R" new raiz-test)"
-bash "$R" worktree "$OP3" --repo "$G" --kind feat >/dev/null 2>&1; rc=$?
+bash "$R" worktree "$OP3" --repo "$G" --kind feat --why "dos escritores en paralelo" >/dev/null 2>&1; rc=$?
 assert_eq "una rama de otra operacion no se reusa" "$rc" "0"
-[ "$(bash "$R" worktree "$OP3" --repo "$G" --kind feat)" != "$WTP" ] && pass "otra operacion obtiene su propio worktree" || fail "otra operacion obtiene su propio worktree"
+[ "$(bash "$R" worktree "$OP3" --repo "$G" --kind feat --why "dos escritores en paralelo")" != "$WTP" ] && pass "otra operacion obtiene su propio worktree" || fail "otra operacion obtiene su propio worktree"
 git -C "$G" branch "feat/ajena" 2>/dev/null
-bash "$R" worktree "$OP3" --repo "$G" --kind feat --branch feat/ajena >/dev/null 2>&1
+bash "$R" worktree "$OP3" --repo "$G" --kind feat --branch feat/ajena --why "dos escritores en paralelo" >/dev/null 2>&1
 assert_eq "rama existente ajena se rechaza" "$?" "4"
 OP4="$(bash "$R" new rama-plana)"
-WP="$(bash "$R" worktree "$OP4" --repo "$G" --branch rama-sin-barra 2>&1)"; rc=$?
+WP="$(bash "$R" worktree "$OP4" --repo "$G" --branch rama-sin-barra --why "dos escritores en paralelo" 2>&1)"; rc=$?
 assert_eq "--branch sin barra funciona" "$rc" "0"
 for w in $(git -C "$G" worktree list --porcelain | sed -n 's/^worktree //p' | tail -n +2); do git -C "$G" worktree remove --force "$w"; done
+
+# --- rama en el checkout principal (modo por defecto) ---
+B="$T/repos/svc"; mkdir -p "$B"; git init -q -b main "$B"; git -C "$B" -c user.email=t@t -c user.name=t commit -q --allow-empty -m i
+OP5="$(bash "$R" new rama-normal)"
+BR="$(bash "$R" branch "$OP5" --repo "$B" --kind fix)"; rc=$?
+assert_eq "branch termina en 0" "$rc" "0"
+assert_contains "branch crea fix/<slug>" "$BR" "fix/"
+assert_eq "el checkout principal queda en la rama de la operacion" "$(git -C "$B" branch --show-current)" "$BR"
+assert_contains "branch queda registrada en state.json" "$(cat "$P/.red/ops/$OP5/state.json")" "\"branches\""
+assert_eq "pedirla de nuevo devuelve la misma" "$(bash "$R" branch "$OP5" --repo "$B" --kind fix)" "$BR"
+git -C "$B" switch -q main
+echo cambio > "$B/sucio.txt"; git -C "$B" add sucio.txt
+OP6="$(bash "$R" new rama-sucia)"
+bash "$R" branch "$OP6" --repo "$B" >/dev/null 2>&1; assert_eq "checkout con cambios sin commitear se rechaza" "$?" "4"
+assert_eq "el rechazo no cambia la rama" "$(git -C "$B" branch --show-current)" "main"
+git -C "$B" reset -q; rm -f "$B/sucio.txt"
+echo ".red/" >> "$B/.gitignore"
+OP7="$(bash "$R" new rama-gitignore)"
+bash "$R" branch "$OP7" --repo "$B" >/dev/null 2>&1; assert_eq "el .gitignore que toca Red no cuenta como cambio ajeno" "$?" "0"
+git -C "$B" checkout -q -- . 2>/dev/null; git -C "$B" switch -q main 2>/dev/null
+
+# --- worktree con docker compose: proyecto compose propio y .env copiado ---
+DC="$T/repos/dock"; mkdir -p "$DC"; git init -q -b main "$DC"
+printf 'services:\n  api:\n    image: x\n    ports: ["8000:8000"]\n' > "$DC/docker-compose.yml"
+printf '.env\n' > "$DC/.gitignore"; printf 'DB_PASS=local\n' > "$DC/.env"
+git -C "$DC" add docker-compose.yml .gitignore; git -C "$DC" -c user.email=t@t -c user.name=t commit -q -m i
+OP8="$(bash "$R" new compose-wt)"
+WD="$(bash "$R" worktree "$OP8" --repo "$DC" --why "experimento descartable" 2>"$T/wd.err")"
+assert_contains "copia el .env al worktree" "$(cat "$WD/.env" 2>/dev/null)" "DB_PASS=local"
+assert_contains "fija un COMPOSE_PROJECT_NAME propio" "$(cat "$WD/.env" 2>/dev/null)" "COMPOSE_PROJECT_NAME="
+assert_contains "avisa la copia del .env" "$(cat "$T/wd.err")" ".env"
+assert_contains "avisa puertos fijos que pueden chocar" "$(cat "$T/wd.err")" "8000"
+assert_eq "el .env copiado no queda en git" "$(git -C "$WD" status --porcelain .env)" ""
+git -C "$DC" worktree remove --force "$WD" 2>/dev/null
 
 # --- .gitignore en un worktree (.git es archivo) ---
 W="$T/wtproj"; git init -q "$W"; git -C "$W" -c user.email=t@t -c user.name=t commit -q --allow-empty -m i

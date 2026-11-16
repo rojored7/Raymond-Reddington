@@ -96,8 +96,9 @@ def resolve_destinations(role, brief, path):
     return out
 
 
-def check_worktree(cfg, path, cwd):
-    """Quien escribe codigo dentro de git lo hace solo en un worktree registrado de la operacion."""
+def check_workspace(cfg, path, cwd):
+    """Quien escribe codigo dentro de git lo hace en un espacio registrado de la operacion: su rama en
+    el checkout principal (modo por defecto, red-op branch) o un worktree justificado (red-op worktree)."""
     if not cfg.get("writes_code"):
         return
     ok, out, _ = run(["git", "rev-parse", "--show-toplevel"], cwd=cwd, timeout=10)
@@ -105,9 +106,18 @@ def check_worktree(cfg, path, cwd):
         return
     top = os.path.normcase(os.path.normpath(out.strip()))
     state = read_json_strict(os.path.join(path, "state.json"), {}) or {}
-    registered = {os.path.normcase(os.path.normpath(w["path"])) for w in state.get("worktrees", [])}
-    if top not in registered:
-        raise Refused(EXIT_BUSY, f"{cwd} no es un worktree de esta operacion: crea uno con red-op worktree")
+    if top in {os.path.normcase(os.path.normpath(w["path"])) for w in state.get("worktrees", [])}:
+        return
+    for b in state.get("branches", []):
+        if os.path.normcase(os.path.normpath(b["repo"])) != top:
+            continue
+        current = run(["git", "-C", cwd, "branch", "--show-current"], timeout=10)[1].strip()
+        if current == b["branch"]:
+            return
+        raise Refused(EXIT_BUSY, f"el checkout esta en '{current}' y la operacion trabaja en '{b['branch']}': "
+                                 f"git switch {b['branch']}")
+    raise Refused(EXIT_BUSY, f"{cwd} no es un espacio de esta operacion: registra la rama con red-op branch "
+                             "(o un worktree justificado con red-op worktree --why)")
 
 
 def render_prompt(role, op, brief, destinations, cwd):
@@ -314,7 +324,7 @@ def main():
         why = forbidden_reason(brief, policy, bool(a.destinations))
         if why:
             raise Refused(EXIT_FORBIDDEN, f"brief rechazado ({why}): requiere autorizacion del usuario")
-        check_worktree(cfg, path, a.cwd)
+        check_workspace(cfg, path, a.cwd)
         prompt = a.message if a.resume and a.message else render_prompt(
             a.role, a.op, brief, a.destinations, a.cwd)
         if a.dry_run:
