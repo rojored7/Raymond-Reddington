@@ -267,9 +267,15 @@ def resolve_claude():
 
 def limits(cfg):
     """Segundos de silencio antes de avisar a Red, y corte duro opcional (None = nunca)."""
-    idle = float(os.environ.get("RED_INACTIVITY_SECONDS") or cfg.get("inactivity_min", 30) * 60)
-    hard = os.environ.get("RED_TIMEOUT_SECONDS")
-    return idle, (float(hard) if hard else None)
+    try:
+        idle = float(os.environ.get("RED_INACTIVITY_SECONDS") or cfg.get("inactivity_min", 30) * 60)
+        hard_env = os.environ.get("RED_TIMEOUT_SECONDS")
+        hard = float(hard_env) if hard_env else None
+    except ValueError as exc:
+        raise Refused(EXIT_USAGE, f"RED_INACTIVITY_SECONDS o RED_TIMEOUT_SECONDS invalido: {exc}") from exc
+    if idle <= 0 or (hard is not None and hard <= 0):
+        raise Refused(EXIT_USAGE, "RED_INACTIVITY_SECONDS y RED_TIMEOUT_SECONDS deben ser positivos")
+    return idle, hard
 
 
 def idle_reporter(path, role, task):
@@ -303,44 +309,58 @@ def ledger_audit(path, role, task, audit):
         ledger(path, "cambios-fuera-de-fase", agent=role, task=task, nota=nota)
 
 
+RETRY_MESSAGE = ("Tu sesion anterior termino sin el reporte final. Continua donde quedaste, sin rehacer lo "
+                 "ya hecho, y entrega SOLO el JSON del reporte.")
+
+
+def save_session(a, role, path, attempt, cmd, code, summary, audit, raw, err):
+    sessions_dir = os.path.join(path, "sessions")
+    record_file = os.path.join(sessions_dir, f"{role}-{len(os.listdir(sessions_dir)) + 1}.json")
+    write_json(record_file, {"ts": now(), "role": role, "phase": a.phase, "flow": a.flow_name,
+                             "attempt": attempt, "exit": code, "cwd": a.cwd, "cmd": cmd, "payload": summary,
+                             "auditoria": audit, "raw": raw[-20000:], "stderr": err[-5000:]})
+    return record_file
+
+
+def delivered(a, role, path, summary, audit, record_file):
+    report = parse_report(summary["result"])
+    ledger(path, "reporte", agent=role, task=a.task, session_id=summary["session_id"],
+           costo=summary["total_cost_usd"], archivo=record_file, estado=(report or {}).get("estado") or "SIN-FORMATO")
+    return {"role": role, "phase": a.phase, "session_id": summary["session_id"], "file": record_file,
+            "cost_usd": summary["total_cost_usd"], "auditoria": audit, "report": report,
+            "result": summary["result"]}
+
+
 def execute(a, role, cfg, policy, path, prompt):
     env = dict(os.environ, RED_ROLE=role, RED_PHASE=a.phase, RED_OP=a.op, RED_OP_DIR=path)
-    resume = a.resume
-    sessions_dir = os.path.join(path, "sessions")
-    os.makedirs(sessions_dir, exist_ok=True)
-    idle_s, hard_s = limits(cfg)
+    os.makedirs(os.path.join(path, "sessions"), exist_ok=True)
+    idle_s, hard_s = a.limits
     if a.phase in cfg.get("invalidates_gate_phases", []):
         flow_control.close_gate(path, f"{role} arranca una fase {a.phase} nueva: el plan puede cambiar")
     before = flow_control.snapshot(a.cwd)
+    resume, message, record_file = a.resume, prompt, None
     for attempt in (1, 2):
         cmd = build_cmd(role, cfg, policy, resume, remote=bool(a.destinations))
         ledger(path, "lanzado", agent=role, task=a.task, nota=f"intento {attempt} cwd={a.cwd}", resume=resume)
         try:
-            code, summary, events, raw, err = run_stream(resolve_claude() + cmd[1:], prompt, env, a.cwd,
-                                                    idle_s, idle_reporter(path, role, a.task), hard_s)
+            code, summary, events, raw, err = run_stream(resolve_claude() + cmd[1:], message, env, a.cwd,
+                                                         idle_s, idle_reporter(path, role, a.task), hard_s)
         except StreamTimeout as exc:
             ledger(path, "timeout", agent=role, task=a.task, nota=str(exc))
             return {"role": role, "error": f"timeout: {exc}"}, EXIT_FAILED
-        n = len(os.listdir(sessions_dir)) + 1
-        record_file = os.path.join(sessions_dir, f"{role}-{n}.json")
+        except OSError as exc:
+            ledger(path, "error", agent=role, task=a.task, nota=f"no se pudo ejecutar claude: {exc}")
+            return {"role": role, "error": f"no se pudo ejecutar claude: {exc}"}, EXIT_FAILED
         audit = audit_session(a, cfg, events, before)
         ledger_audit(path, role, a.task, audit)
-        write_json(record_file, {"ts": now(), "role": role, "phase": a.phase, "flow": a.flow_name,
-                                 "attempt": attempt, "exit": code, "cwd": a.cwd, "cmd": cmd, "payload": summary,
-                                 "auditoria": audit, "raw": raw[-20000:], "stderr": err[-5000:]})
-        result = summary["result"]
-        if code == 0 and result:
-            report = parse_report(result)
-            ledger(path, "reporte", agent=role, task=a.task, session_id=summary["session_id"],
-                   costo=summary["total_cost_usd"], archivo=record_file,
-                   estado=(report or {}).get("estado") or "SIN-FORMATO")
-            return {"role": role, "phase": a.phase, "session_id": summary["session_id"], "file": record_file,
-                    "cost_usd": summary["total_cost_usd"], "auditoria": audit, "report": report,
-                    "result": result}, 0
-        evento = "vacio" if code == 0 else "error"
-        ledger(path, evento, agent=role, task=a.task, nota=f"exit={code} {err.strip()[-300:]}",
-               costo=summary["total_cost_usd"], archivo=record_file)
+        record_file = save_session(a, role, path, attempt, cmd, code, summary, audit, raw, err)
+        if code == 0 and summary["result"]:
+            return delivered(a, role, path, summary, audit, record_file), 0
+        ledger(path, "vacio" if code == 0 else "error", agent=role, task=a.task,
+               nota=f"exit={code} {err.strip()[-300:]}", costo=summary["total_cost_usd"], archivo=record_file)
         resume = summary["session_id"] or resume
+        if resume:  # retomar la misma sesion: pedir solo el reporte, no reenviar el encargo completo
+            message = RETRY_MESSAGE
     return {"role": role, "error": "sin resultado tras 2 intentos", "file": record_file}, EXIT_FAILED
 
 
@@ -384,46 +404,62 @@ def validate(a, cfg):
     return path
 
 
-def main():
-    utf8_stdio()
+def parse_args():
     p = argparse.ArgumentParser(prog="launch-operative")
     p.add_argument("role"); p.add_argument("op"); p.add_argument("brief")
     p.add_argument("--resume"); p.add_argument("--message")
     p.add_argument("--cwd"); p.add_argument("--dry-run", action="store_true")
-    a = p.parse_args()
-    policy = load_roles()
-    cfg = policy["roles"].get(a.role)
-    try:
-        if cfg is None:
-            raise Refused(EXIT_USAGE, f"rol desconocido: {a.role}. Validos: {', '.join(policy['roles'])}")
-        brief = read_json(a.brief)
-        if not isinstance(brief, dict):
-            raise Refused(EXIT_USAGE, f"brief ilegible: {a.brief}")
-        a.task = brief.get("task")
-        a.phase = resolve_phase(a.role, cfg, brief)
-        path = validate(a, cfg)
-        a.destinations = resolve_destinations(a.role, brief, path)
-        why = forbidden_reason(brief, policy, bool(a.destinations))
+    return p.parse_args()
+
+
+def check_rules(a, cfg, policy, brief, path):
+    """Reglas del encargo: produccion/push/deploy, flujo, aprobacion, espacio de trabajo y guard."""
+    why = forbidden_reason(brief, policy, bool(a.destinations))
+    if why:
+        raise Refused(EXIT_FORBIDDEN, f"brief rechazado ({why}): requiere autorizacion del usuario")
+    if a.resume and a.message:
+        why = forbidden_reason({"message": a.message}, policy, bool(a.destinations))
         if why:
-            raise Refused(EXIT_FORBIDDEN, f"brief rechazado ({why}): requiere autorizacion del usuario")
-        if a.resume and a.message:
-            why = forbidden_reason({"message": a.message}, policy, bool(a.destinations))
-            if why:
-                raise Refused(EXIT_FORBIDDEN, f"mensaje de resume rechazado ({why}): requiere autorizacion del usuario")
-        try:
-            a.flow_name, a.flow_cfg = flow_control.flow_for(a.role, cfg, brief, policy)
-        except ValueError as exc:
-            raise Refused(EXIT_USAGE, str(exc)) from exc
-        denial = flow_control.approval_error(cfg, a.phase, path)
-        if denial:
-            raise Refused(EXIT_FORBIDDEN, denial)
-        check_workspace(cfg, path, a.cwd)
-        broken = preflight_guard()
-        if broken:
-            raise Refused(EXIT_FORBIDDEN, broken)
-        flow_lines = flow_control.flow_prompt(a.flow_name, a.flow_cfg, a.phase)
-        prompt = a.message if a.resume and a.message else render_prompt(
-            a.role, a.op, brief, a.destinations, a.cwd, a.phase, flow_lines)
+            raise Refused(EXIT_FORBIDDEN, f"mensaje de resume rechazado ({why}): requiere autorizacion del usuario")
+    try:
+        a.flow_name, a.flow_cfg = flow_control.flow_for(a.role, cfg, brief, policy)
+    except ValueError as exc:
+        raise Refused(EXIT_USAGE, str(exc)) from exc
+    denial = flow_control.approval_error(cfg, a.phase, path)
+    if denial:
+        raise Refused(EXIT_FORBIDDEN, denial)
+    check_workspace(cfg, path, a.cwd)
+    broken = preflight_guard()
+    if broken:
+        raise Refused(EXIT_FORBIDDEN, broken)
+
+
+def prepare(a, policy):
+    """Valida todo antes de lanzar. Devuelve (cfg, ruta de la operacion, prompt)."""
+    cfg = policy["roles"].get(a.role)
+    if cfg is None:
+        raise Refused(EXIT_USAGE, f"rol desconocido: {a.role}. Validos: {', '.join(policy['roles'])}")
+    brief = read_json(a.brief)
+    if not isinstance(brief, dict):
+        raise Refused(EXIT_USAGE, f"brief ilegible: {a.brief}")
+    a.task = brief.get("task")
+    a.phase = resolve_phase(a.role, cfg, brief)
+    a.limits = limits(cfg)
+    path = validate(a, cfg)
+    a.destinations = resolve_destinations(a.role, brief, path)
+    check_rules(a, cfg, policy, brief, path)
+    flow_lines = flow_control.flow_prompt(a.flow_name, a.flow_cfg, a.phase)
+    prompt = a.message if a.resume and a.message else render_prompt(
+        a.role, a.op, brief, a.destinations, a.cwd, a.phase, flow_lines)
+    return cfg, path, prompt
+
+
+def main():
+    utf8_stdio()
+    a = parse_args()
+    policy = load_roles()
+    try:
+        cfg, path, prompt = prepare(a, policy)
         if a.dry_run:
             register(path, a.role, None)
             cmd = build_cmd(a.role, cfg, policy, a.resume, remote=bool(a.destinations))

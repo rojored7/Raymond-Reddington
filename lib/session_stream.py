@@ -9,6 +9,7 @@ Por que streaming y no `--output-format json`:
 import json
 import os
 import queue
+import signal
 import re
 import subprocess
 import threading
@@ -76,10 +77,15 @@ def parse_line(line):
 
 
 def kill_tree(proc):
-    """Mata la sesion y sus hijos. En Windows proc.kill() dejaria huerfanos gastando."""
+    """Mata la sesion y sus hijos (huerfanos seguirian gastando). Windows: taskkill /T; POSIX: su grupo."""
+    if proc.poll() is not None:
+        return
     if os.name == "nt":
         subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True)
-    else:
+        return
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)  # la sesion nace en su propio grupo (start_new_session)
+    except OSError:
         proc.kill()
 
 
@@ -99,7 +105,8 @@ def _feed(stdin, prompt):
 
 def _start(argv, prompt, env, cwd):
     proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                            cwd=cwd, env=env, text=True, encoding="utf-8", errors="replace")
+                            cwd=cwd, env=env, text=True, encoding="utf-8", errors="replace",
+                            start_new_session=(os.name != "nt"))
     lines, errors = queue.Queue(), queue.Queue()
     workers = [threading.Thread(target=_pump, args=(proc.stdout, lines), daemon=True),
                threading.Thread(target=_pump, args=(proc.stderr, errors), daemon=True),
@@ -126,6 +133,24 @@ def run_stream(argv, prompt, env, cwd, inactivity_s, on_idle, hard_timeout_s=Non
     El aviso se rearma: tras volver la actividad, otro silencio largo vuelve a avisar.
     """
     proc, lines, errors, workers = _start(argv, prompt, env, cwd)
+    try:
+        raw, events = _consume(proc, lines, inactivity_s, on_idle, hard_timeout_s, poll_s)
+        try:
+            proc.wait(timeout=EXIT_GRACE_S)  # stdout cerrado pero el proceso sigue: no se espera para siempre
+        except subprocess.TimeoutExpired:
+            kill_tree(proc)
+            proc.wait()
+    finally:
+        kill_tree(proc)  # pase lo que pase en el lanzador, no queda una sesion huerfana gastando
+    for w in workers[:2]:
+        w.join(timeout=5)
+    return proc.returncode, summarize(events), events, "".join(raw), "".join(_drain(errors))
+
+
+EXIT_GRACE_S = 60
+
+
+def _consume(proc, lines, inactivity_s, on_idle, hard_timeout_s, poll_s):
     raw, events = [], []
     start = last = time.monotonic()
     alerted = False
@@ -135,23 +160,18 @@ def run_stream(argv, prompt, env, cwd, inactivity_s, on_idle, hard_timeout_s=Non
         except queue.Empty:
             item = _EMPTY
         if item is None:
-            break
+            return raw, events
         moment = time.monotonic()
+        if hard_timeout_s and moment - start > hard_timeout_s:  # tambien con salida continua
+            kill_tree(proc)
+            proc.wait()
+            raise StreamTimeout(f"sin terminar en {int(hard_timeout_s)} s")
         if item is not _EMPTY:
             raw.append(item)
             event = parse_line(item)
             if event is not None:
                 events.append(event)
             last, alerted = moment, False
-            continue
-        if hard_timeout_s and moment - start > hard_timeout_s:
-            kill_tree(proc)
-            proc.wait()
-            raise StreamTimeout(f"sin terminar en {int(hard_timeout_s)} s")
-        if not alerted and moment - last >= inactivity_s:
+        elif not alerted and moment - last >= inactivity_s:
             on_idle(int(moment - last))
             alerted = True
-    proc.wait()
-    for w in workers[:2]:
-        w.join(timeout=5)
-    return proc.returncode, summarize(events), events, "".join(raw), "".join(_drain(errors))

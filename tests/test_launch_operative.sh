@@ -148,8 +148,10 @@ rm -f "$OPD/running.json"
 FAKE="$T/bin"; mkdir -p "$FAKE"
 cat > "$FAKE/claude.py" <<'EOF'
 import json, os, sys, time
-sys.stdin.read()
+prompt_in = sys.stdin.read()
 path = os.environ["RED_FAKE_COUNTER"]
+open(path + ".stdin", "a", encoding="utf-8").write(prompt_in + "\n=====\n")
+open(path + ".pid", "w").write(str(os.getpid()))
 n = (int(open(path).read()) if os.path.exists(path) else 0) + 1
 open(path, "w").write(str(n))
 open(path + ".args", "a").write(json.dumps(sys.argv[1:]) + "\n")
@@ -161,6 +163,10 @@ def emit(ev):
 def result(text, cost=0.01):
     emit({"type": "result", "subtype": "success", "result": text, "session_id": sid, "total_cost_usd": cost})
 emit({"type": "system", "subtype": "init", "session_id": sid, "cwd": os.getcwd()})
+if mode == "chatty":  # salida continua: el corte duro igual debe aplicar
+    for _ in range(200):
+        emit({"type": "assistant", "parent_tool_use_id": None, "message": {"content": [{"type": "text", "text": "."}]}})
+        time.sleep(0.1)
 if mode in ("sleep", "quiet"):  # quiet: silencio y luego responde (aviso de inactividad, sin matar)
     time.sleep(float(os.environ.get("RED_FAKE_SLEEP", "3")))
 if mode == "fenced":
@@ -209,11 +215,14 @@ assert_contains "registra reporte en el ledger" "$(cat "$OPD/ledger.jsonl")" '"e
 assert_eq "limpia running.json al terminar" "$(json_get "$OPD/running.json" sessions)" "[]"
 assert_contains "los argumentos con * y parentesis llegan intactos" "$(cat "$T/count.args")" '"Bash(kubectl:*)"'
 
-rm -f "$T/count" "$T/count.args"
+rm -f "$T/count" "$T/count.args" "$T/count.stdin"
 out="$(RED_FAKE_MODE=empty_once bash "$L" baz op1 "$BRIEF" 2>&1)"
 assert_eq "relanza una vez ante resultado vacio" "$(cat "$T/count")" "2"
 assert_contains "registra la falla por vacio" "$(cat "$OPD/ledger.jsonl")" '"evento": "vacio"'
 assert_contains "el relanzamiento retoma la sesion vacia" "$(sed -n 2p "$T/count.args")" '"--resume", "s-empty"'
+second="$("$PY" -c "import sys;print(open(sys.argv[1],encoding='utf-8').read().split('=====')[1])" "$T/count.stdin")"
+assert_contains "el reintento pide solo el reporte, no reenvia el encargo" "$second" "Continua donde quedaste"
+assert_not_contains "el reintento no repite el encargo completo" "$second" "ENCARGO DE RED"
 
 # --- resume de baz retoma en el worktree donde nacio la sesion ---
 git -C "$G" worktree add -q -b feat/y "$T/repos/worktrees/app-y" 2>/dev/null
@@ -372,11 +381,28 @@ EOF
 assert_eq "si git status falla la auditoria queda sin verificar y no ok" "$check" "True False True"
 cp "$T/state.bak" "$OPD/state.json"
 
+# --- entorno invalido y claude ausente: codigos documentados, sin traceback ---
+RED_INACTIVITY_SECONDS=abc bash "$L" glen op1 "$BRIEF" --dry-run >/dev/null 2>&1; assert_eq "RED_INACTIVITY_SECONDS invalido es entrada invalida" "$?" "2"
+out="$(RED_CLAUDE_BIN="$T/no-existe.exe" bash "$L" glen op1 "$BRIEF" 2>&1)"; rc=$?
+assert_eq "claude que no se puede ejecutar: codigo 5" "$rc" "5"
+assert_not_contains "claude que no se puede ejecutar: sin traceback" "$out" "Traceback"
+assert_contains "claude que no se puede ejecutar: queda en el ledger" "$(tail -3 "$OPD/ledger.jsonl")" '"evento": "error"'
+assert_eq "claude que no se puede ejecutar: running.json queda vacio" "$(json_get "$OPD/running.json" sessions)" "[]"
+
+# --- corte duro con salida continua ---
+start=$(date +%s)
+out="$(RED_FAKE_MODE=chatty RED_TIMEOUT_SECONDS=2 bash "$L" glen op1 "$BRIEF" 2>&1)"; rc=$?
+took=$(( $(date +%s) - start ))
+assert_eq "salida continua no evita el corte duro" "$rc" "5"
+[ "$took" -lt 15 ] && pass "el corte duro llega a tiempo con salida continua ($took s)" || fail "el corte duro llega a tiempo con salida continua" "$took s"
+
 # --- timeout duro solo si se pide explicitamente (S7) ---
 out="$(RED_FAKE_MODE=sleep RED_FAKE_SLEEP=20 RED_TIMEOUT_SECONDS=2 bash "$L" glen op1 "$BRIEF" 2>&1)"; rc=$?
 assert_eq "sesion colgada termina con codigo 5" "$rc" "5"
 assert_contains "registra el timeout en el ledger" "$(cat "$OPD/ledger.jsonl")" '"evento": "timeout"'
 assert_eq "tras timeout running.json queda vacio" "$(json_get "$OPD/running.json" sessions)" "[]"
+alive="$("$PY" -c "import sys;sys.path.insert(0,sys.argv[1]);from common import is_alive;print(is_alive(int(open(sys.argv[2]).read())))" "$ROOT/lib" "$T/count.pid")"
+assert_eq "el corte duro mata la sesion (no queda huerfana gastando)" "$alive" "False"
 
 cd / && rm -rf "$T"
 finish
