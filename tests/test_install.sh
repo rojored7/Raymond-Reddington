@@ -36,6 +36,8 @@ assert_contains "conserva hook previo de PreToolUse" "$s" "echo previo"
 assert_contains "conserva env" "$s" '"X": "1"'
 assert_contains "B1: guard de worktrees en settings.json de usuario" "$s" "guard-worktree-deletion.sh"
 assert_contains "B1: stop guard en settings.json de usuario" "$s" "red-stop-guard.sh"
+assert_contains "registra el hook de aprobacion (UserPromptSubmit)" "$s" "red-approval.sh"
+assert_contains "el hook de aprobacion va en UserPromptSubmit" "$(json_get "$C/settings.json" hooks.UserPromptSubmit)" "red-approval.sh"
 assert_eq "siembra destinos de ejemplo marcados" "$(json_get "$C/red/destinations.json" destinations.0.example)" "True"
 assert_not_contains "la plantilla no trae IPs reales" "$(cat "$ROOT/templates/destinations.json")" "192.168"
 assert_eq "siembra tope mensual de 150" "$(json_get "$C/red/budget.json" monthly_usd)" "150"
@@ -74,6 +76,7 @@ assert_contains "check avisa si agent=red quedo global" "$out" "agent=red global
 out="$(bash "$I" --check 2>&1)"; assert_eq "check sin diferencias termina en 0" "$?" "0"
 assert_contains "check corre los self-test de los hooks" "$out" "self-test"
 assert_contains "check corre el self-test del write guard" "$out" "red-write-guard.sh: self-test ok"
+assert_contains "check corre el self-test del hook de aprobacion" "$out" "red-approval.sh: self-test ok"
 echo "cambio" >> "$C/agents/glen.md"
 out="$(bash "$I" --check 2>&1)"; rc=$?
 assert_eq "check con diferencias termina en 1" "$rc" "1"

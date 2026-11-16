@@ -20,7 +20,8 @@ from common import CorruptJSON, read_json_strict, to_native, write_json  # noqa:
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CODE_DIRS = ("scripts", "hooks", "lib", os.path.join("templates", "protocol"))
 SEED_FILES = ("reputation.json", "ops-index.json", "destinations.json", "budget.json", "lecciones-aprendidas.md")
-HOOKS = {"PreToolUse": ("Bash", "guard-worktree-deletion.sh"), "Stop": (None, "red-stop-guard.sh")}
+HOOKS = {"PreToolUse": ("Bash", "guard-worktree-deletion.sh"), "Stop": (None, "red-stop-guard.sh"),
+         "UserPromptSubmit": (None, "red-approval.sh")}
 EXIT_CORRUPT = 3
 
 
@@ -131,7 +132,7 @@ def install():
 
 def self_tests(red):
     lines, ok = [], True
-    for script in ("guard-worktree-deletion.sh", "red-stop-guard.sh", "red-write-guard.sh"):
+    for script in ("guard-worktree-deletion.sh", "red-stop-guard.sh", "red-write-guard.sh", "red-approval.sh"):
         path = os.path.join(red, "hooks", script).replace(os.sep, "/")
         try:
             bash = os.environ.get("RED_BASH") or "bash"  # el bash de Git, no el de WSL
