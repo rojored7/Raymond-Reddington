@@ -276,10 +276,15 @@ def _only_red_gitignore(repo):
 
 
 def _foreign_changes(repo):
-    """Cambios sin commitear que no son de Red: con ellos no se cambia de rama en el checkout."""
-    out = run(["git", "-C", repo, "status", "--porcelain"])[1]
-    paths = [ln[3:].strip() for ln in out.splitlines() if ln.strip()]
-    return [p for p in paths if not (p == ".gitignore" and _only_red_gitignore(repo))]
+    """Cambios sin commitear que no son de Red: con ellos no se cambia de rama en el checkout.
+
+    Son de Red: la linea .red/ del .gitignore y los documentos del protocolo que Glen genero en fase
+    init (sin seguimiento todavia): se presentan en el gate y viajan a la rama de la operacion."""
+    out = run(["git", "-c", "core.quotepath=false", "-C", repo, "status", "--porcelain"])[1]
+    entries = [(ln[:2], ln[3:].strip()) for ln in out.splitlines() if ln.strip()]
+    return [p for code, p in entries
+            if not (p == ".gitignore" and _only_red_gitignore(repo))
+            and not (code == "??" and p in docs_audit.PROTOCOL_DOCS)]
 
 
 def cmd_branch(a):

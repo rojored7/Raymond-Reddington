@@ -146,6 +146,14 @@ printf '\n.red/\n' >> "$B/.gitignore"
 OP7="$(bash "$R" new rama-gitignore)"
 bash "$R" branch "$OP7" --repo "$B" >/dev/null 2>&1; assert_eq "el .gitignore que toca Red no cuenta como cambio ajeno" "$?" "0"
 git -C "$B" checkout -q -- . 2>/dev/null; git -C "$B" switch -q main 2>/dev/null
+echo a > "$B/CLAUDE.md"; echo b > "$B/TECHNICAL_DOCUMENTATION.md"; echo c > "$B/CLAUDE.local.md"
+OP9="$(bash "$R" new tras-glen-init)"
+bash "$R" branch "$OP9" --repo "$B" >/dev/null 2>&1; assert_eq "los documentos del protocolo que genero Glen no cuentan como cambio ajeno" "$?" "0"
+assert_eq "los documentos viajan a la rama de la operacion" "$(ls "$B/CLAUDE.md" 2>/dev/null)" "$B/CLAUDE.md"
+git -C "$B" switch -q main 2>/dev/null; echo x > "$B/otro-suelto.txt"
+OP10="$(bash "$R" new con-suelto)"
+bash "$R" branch "$OP10" --repo "$B" >/dev/null 2>&1; assert_eq "otro archivo sin seguimiento si cuenta como cambio ajeno" "$?" "4"
+rm -f "$B/otro-suelto.txt" "$B"/CLAUDE*.md "$B/TECHNICAL_DOCUMENTATION.md"
 
 # --- worktree con docker compose: proyecto compose propio y .env copiado ---
 DC="$T/repos/dock"; mkdir -p "$DC"; git init -q -b main "$DC"
