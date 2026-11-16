@@ -132,6 +132,33 @@ def commits_between(before, after):
     return commits
 
 
+def manifest_paths(brief, root):
+    """Rutas (relativas al repo) que el manifiesto de Dembe autoriza a borrar. Acepta rutas relativas,
+    absolutas, con './' o prefijadas con el nombre del repo, y entradas {"id"|"path"|"ruta": ...}."""
+    entries = (((brief or {}).get("inputs") or {}).get("manifiesto_limpieza") or {}).get("borrar") or []
+    root_norm = os.path.normcase(os.path.realpath(root))
+    prefix = os.path.basename(root_norm) + "/"
+    out = set()
+    for entry in entries:
+        raw = entry if isinstance(entry, str) else next(
+            (entry.get(k) for k in ("id", "path", "ruta") if isinstance(entry, dict) and entry.get(k)), "")
+        if not raw:
+            continue
+        if os.path.isabs(raw):
+            try:
+                raw = os.path.relpath(os.path.normcase(os.path.realpath(raw)), root_norm)
+            except ValueError:
+                continue
+        rel = raw.replace("\\", "/")
+        while rel.startswith("./"):
+            rel = rel[2:]
+        if os.path.normcase(rel).startswith(os.path.normcase(prefix)):
+            rel = rel[len(prefix):]
+        if rel and not rel.startswith("../"):
+            out.add(rel.rstrip("/"))
+    return out
+
+
 def changes_outside(before, after, allowed, root, may_delete=False):
     """(rutas fuera de lo permitido, hubo commits, sin_verificar) entre dos snapshots.
 
@@ -144,12 +171,19 @@ def changes_outside(before, after, allowed, root, may_delete=False):
         return [], False, True
     paths = {p for p in set(before["files"]) | set(after["files"])
              if before["files"].get(p) != after["files"].get(p)
-             and not (may_delete and after["files"].get(p) == "ausente")}  # borrar es el oficio de Kaplan
+             and not (_deletion_allowed(may_delete, p) and after["files"].get(p) == "ausente")}
     committed = before["head"] != after["head"]
     if committed:
         paths |= set(_committed_paths(before, after))
     outside = sorted(p for p in paths if not any(matches(os.path.join(root, p), pat, root) for pat in allowed))
     return outside, committed, False
+
+
+def _deletion_allowed(may_delete, path):
+    """True: cualquier borrado; un conjunto: solo esas rutas (las del manifiesto); False: ninguno."""
+    if isinstance(may_delete, (set, frozenset, list, tuple)):
+        return os.path.normcase(path) in {os.path.normcase(p) for p in may_delete}
+    return bool(may_delete)
 
 
 def build_audit(stream_audit, required, outside, committed, coordinator, unverified=False):
@@ -158,6 +192,7 @@ def build_audit(stream_audit, required, outside, committed, coordinator, unverif
     missing = [a for a in required if a not in launched]
     direct = stream_audit["ediciones_directas"] if coordinator else []
     return {"agentes_requeridos": required, "agentes_lanzados": launched, "agentes_faltantes": missing,
+            "agentes_sin_definicion": stream_audit.get("agentes_sin_definicion", []),
             "ediciones_directas": direct, "cambios_fuera_de_fase": outside, "commits_en_fase": committed,
             "sin_verificar": unverified,
             "ok": not (missing or direct or unverified or _flagged(outside) or _flagged(committed))}

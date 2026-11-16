@@ -182,15 +182,18 @@ if mode == "multi":  # subagentes en segundo plano: varios result, el reporte es
     result('{"estado": "COMPLETADO", "hecho": [], "contradicciones": []}', 0.90)
     result("", 0.90)
     sys.exit(0)
-def tool(name, inp, parent=None):
+def tool(name, inp, parent=None, tid=None):
     emit({"type": "assistant", "parent_tool_use_id": parent,
-          "message": {"content": [{"type": "tool_use", "name": name, "input": inp}]}})
-if mode in ("agents", "skip"):
-    tool("Agent", {"subagent_type": "impact-prevalidator", "description": "impacto"})
+          "message": {"content": [{"type": "tool_use", "id": tid or f"tu-{name}", "name": name, "input": inp}]}})
+if mode in ("agents", "skip", "fake_tag"):
+    tool("Agent", {"subagent_type": "impact-prevalidator", "description": "impacto"}, tid="tu-imp")
     if mode == "agents":
-        tool("Agent", {"subagent_type": "general-purpose", "description": "[agente:code-explorer] trazar el bug"})
+        tool("Agent", {"subagent_type": "general-purpose", "description": "[agente:code-explorer] trazar el bug"}, tid="tu-ce")
+        tool("Read", {"file_path": "C:\\Users\\x\\.claude\\redwork\\agents\\code-explorer.md"}, parent="tu-ce", tid="tu-r1")
         tool("Edit", {"file_path": "sub.py"}, parent="toolu_sub")
         tool("Edit", {"file_path": "app/x.py"})
+    if mode == "fake_tag":
+        tool("Agent", {"subagent_type": "general-purpose", "description": "[agente:code-explorer] sin cargar nada"}, tid="tu-fake")
 if mode == "dirty":
     open("app.py", "a").write("# cambio en fase plan\n")
     os.makedirs("outputs", exist_ok=True)
@@ -338,6 +341,9 @@ out="$(RED_FAKE_MODE=skip bash "$L" baz op1 "$T/bug-plan.json" 2>&1)"
 assert_contains "detecta el agente obligatorio que no corrio" "$(aud agentes_faltantes)" "code-explorer"
 assert_eq "la auditoria marca la entrega" "$(aud ok)" "False"
 assert_contains "el faltante queda en el ledger" "$(cat "$OPD/ledger.jsonl")" '"evento": "agentes-faltantes"'
+out="$(RED_FAKE_MODE=fake_tag bash "$L" baz op1 "$T/bug-plan.json" 2>&1)"
+assert_contains "una etiqueta sin definicion cargada no cuenta como lanzado" "$(aud agentes_faltantes)" "code-explorer"
+assert_contains "la etiqueta sin evidencia se reporta aparte" "$(aud agentes_sin_definicion)" "code-explorer"
 
 # --- sin guard de escritura que funcione no se lanza a nadie ---
 RB="$T/rr-roto"; mkdir -p "$RB"; cp -r "$ROOT/hooks" "$ROOT/scripts" "$ROOT/lib" "$RB/"
@@ -470,6 +476,19 @@ print(flow_control.changes_outside(before, after, [], ".", may_delete=True)[0],
 EOF
 )"
 assert_eq "kaplan: borrar no es cambio fuera de fase, crear si" "$check" "['nuevo.txt'] ['.coverage', 'nuevo.txt']"
+check="$("$PY" - "$ROOT/lib" "$T" <<'EOF'
+import os, sys
+sys.path.insert(0, sys.argv[1])
+import flow_control
+root = os.path.join(sys.argv[2], "toy")
+listed = flow_control.manifest_paths(
+    {"inputs": {"manifiesto_limpieza": {"borrar": ["toy/.coverage", {"id": os.path.join(root, "logs", "a.log")}, "./tmp.txt"]}}}, root)
+before = {"head": "a", "root": root, "files": {".coverage": "h", "otro.txt": "h", "tmp.txt": "h"}}
+after = {"head": "a", "root": root, "files": {".coverage": "ausente", "otro.txt": "ausente", "tmp.txt": "ausente"}}
+print(sorted(listed), flow_control.changes_outside(before, after, [], root, may_delete=listed)[0])
+EOF
+)"
+assert_eq "kaplan: solo borra lo del manifiesto (normalizado); lo demas es falta" "$check" "['.coverage', 'logs/a.log', 'tmp.txt'] ['otro.txt']"
 cp "$T/state.bak" "$OPD/state.json"
 
 # --- entorno invalido y claude ausente: codigos documentados, sin traceback ---

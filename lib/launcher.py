@@ -294,8 +294,10 @@ def audit_session(a, cfg, events, before):
     """Agentes obligatorios del flujo, ediciones del coordinador y cambios fuera de lo que la fase permite."""
     allowed = (cfg.get("write_paths") or {}).get(a.phase, "*")
     after = flow_control.snapshot(a.cwd) if before is not None else None
-    outside, committed, unverified = flow_control.changes_outside(
-        before, after, allowed, workspace_root(a.cwd), may_delete=bool(cfg.get("may_delete")))
+    root = workspace_root(a.cwd)
+    may_delete = (flow_control.manifest_paths(a.brief, root) if cfg.get("may_delete") == "manifest"
+                  else bool(cfg.get("may_delete")))
+    outside, committed, unverified = flow_control.changes_outside(before, after, allowed, root, may_delete=may_delete)
     required = flow_control.required_agents(a.flow_cfg, a.phase)
     commits = flow_control.commits_between(before, after)
     return {**flow_control.build_audit(audit_events(events), required, outside, committed,
@@ -451,6 +453,7 @@ def prepare(a, policy):
     if not isinstance(brief, dict):
         raise Refused(EXIT_USAGE, f"brief ilegible: {a.brief}")
     a.task = brief.get("task")
+    a.brief = brief
     a.phase = resolve_phase(a.role, cfg, brief)
     a.limits = limits(cfg)
     path = validate(a, cfg)

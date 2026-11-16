@@ -44,28 +44,50 @@ WRITE_TOOLS = ("Edit", "Write", "MultiEdit", "NotebookEdit")
 AGENT_TAG = re.compile(r"\[agente:([\w.\-]+)\]")
 
 
-def audit_events(events):
-    """Que agentes se lanzaron (a cualquier nivel) y que archivos edito la sesion principal.
-
-    Un general-purpose que carga un agente de RedWork se identifica por su etiqueta [agente:<n>].
-    Una edicion con parent_tool_use_id es de un subagente; sin el, la hizo el coordinador.
-    """
-    launched, direct = set(), []
+def _tool_uses(events):
+    """(tool_use, parent_tool_use_id) de los eventos del asistente, a cualquier nivel."""
     for ev in events:
         if ev.get("type") != "assistant":
             continue
-        top_level = ev.get("parent_tool_use_id") is None
         for part in (ev.get("message") or {}).get("content") or []:
-            if not isinstance(part, dict) or part.get("type") != "tool_use":
-                continue
-            name, params = part.get("name"), part.get("input") or {}
-            if name in AGENT_TOOLS:
-                kind = params.get("subagent_type") or "general-purpose"
-                tag = AGENT_TAG.search(f"{params.get('description', '')} {str(params.get('prompt', ''))[:300]}")
-                launched.add(tag.group(1) if tag and kind == "general-purpose" else kind)
-            elif top_level and name in WRITE_TOOLS:
-                direct.append(params.get("file_path") or params.get("notebook_path") or "?")
-    return {"agentes_lanzados": sorted(launched), "ediciones_directas": direct}
+            if isinstance(part, dict) and part.get("type") == "tool_use":
+                yield part, ev.get("parent_tool_use_id")
+
+
+def _definition_loaded(name, params, reads):
+    """Un general-purpose etiquetado [agente:X] cuenta como X solo con evidencia de que cargo su
+    definicion: el texto en el prompt (name: X) o un Read de .../agents/X.md hecho por ese subagente."""
+    if re.search(r"^name:\s*" + re.escape(name) + r"\s*$", str(params.get("prompt", "")), re.M):
+        return True
+    return any(p.replace("\\", "/").lower().endswith(f"/agents/{name.lower()}.md") for p in reads)
+
+
+def audit_events(events):
+    """Que agentes se lanzaron (a cualquier nivel) y que archivos edito la sesion principal.
+
+    Una edicion con parent_tool_use_id es de un subagente; sin el, la hizo el coordinador.
+    """
+    uses = list(_tool_uses(events))
+    reads_by_parent = {}
+    for part, parent in uses:
+        if part.get("name") == "Read" and parent:
+            reads_by_parent.setdefault(parent, []).append(str((part.get("input") or {}).get("file_path", "")))
+    launched, undefined, direct = set(), set(), []
+    for part, parent in uses:
+        name, params = part.get("name"), part.get("input") or {}
+        if name in AGENT_TOOLS:
+            kind = params.get("subagent_type") or "general-purpose"
+            tag = AGENT_TAG.search(f"{params.get('description', '')} {str(params.get('prompt', ''))[:300]}")
+            if kind != "general-purpose" or not tag:
+                launched.add(kind)
+            elif _definition_loaded(tag.group(1), params, reads_by_parent.get(part.get("id"), [])):
+                launched.add(tag.group(1))
+            else:
+                undefined.add(tag.group(1))
+        elif parent is None and name in WRITE_TOOLS:
+            direct.append(params.get("file_path") or params.get("notebook_path") or "?")
+    return {"agentes_lanzados": sorted(launched), "agentes_sin_definicion": sorted(undefined - launched),
+            "ediciones_directas": direct}
 
 
 def parse_line(line):
