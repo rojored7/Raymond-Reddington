@@ -164,6 +164,31 @@ bash "$R" new en-worktree >/dev/null
 assert_contains "agrega .red/ al .gitignore dentro de un worktree" "$(cat .gitignore 2>/dev/null)" ".red/"
 cd / && git -C "$W" worktree remove --force "$T/wtcheckout" 2>/dev/null
 
+# --- archivos .md: validos si los exige el flujo, el protocolo o una justificacion registrada ---
+cd "$P" || exit 1
+M="$T/repos/md"; mkdir -p "$M"; git init -q -b main "$M"; git -C "$M" -c user.email=t@t -c user.name=t commit -q --allow-empty -m base
+MBASE="$(git -C "$M" rev-parse HEAD)"
+OPM="$(bash "$R" new docs-md)"
+mkdir -p "$M/outputs" "$M/docs"
+echo a > "$M/outputs/00b_impact_analysis.md"; echo b > "$M/CLAUDE.md"; echo c > "$M/notas-sueltas.md"; echo d > "$M/docs/diseno.md"
+git -C "$M" add outputs CLAUDE.md docs; git -C "$M" -c user.email=t@t -c user.name=t commit -q -m trabajo
+bash "$R" doc "$OPM" --path docs/diseno.md --why "el usuario pidio el diseno por escrito"
+assert_contains "doc registra la justificacion como decision" "$(cat "$P/.red/ops/$OPM/decisions.jsonl")" "docs/diseno.md"
+out="$(bash "$R" md-audit "$OPM" --repo "$M" --base "$MBASE")"; rc=$?
+assert_eq "md-audit con un .md sin justificar sale con 1" "$rc" "1"
+assert_contains "md-audit nombra el .md sin justificar" "$out" "notas-sueltas.md"
+assert_contains "los artefactos del flujo son validos" "$out" '"outputs/00b_impact_analysis.md"'
+sin="$("$PY" -c "import json,sys;print(json.loads(sys.stdin.read())['sin_justificacion'])" <<< "$out")"
+assert_not_contains "el protocolo es valido" "$sin" "CLAUDE.md"
+assert_not_contains "lo justificado es valido" "$sin" "diseno.md"
+rm "$M/notas-sueltas.md"
+echo e > "$M/sin-commit.md"
+out="$(bash "$R" md-audit "$OPM" --repo "$M" --base "$MBASE")"; rc=$?
+assert_eq "un .md sin commitear tambien cuenta" "$rc" "1"
+assert_contains "md-audit ve archivos sin commitear" "$out" "sin-commit.md"
+rm "$M/sin-commit.md"; git -C "$M" rm -q notas-sueltas.md; git -C "$M" -c user.email=t@t -c user.name=t commit -q -m limpio
+bash "$R" md-audit "$OPM" --repo "$M" --base "$MBASE" >/dev/null; assert_eq "sin .md basura sale con 0" "$?" "0"
+
 # --- alertas: el canal de los tenientes hacia Red ---
 cd "$P" || exit 1
 AOP="$(bash "$R" new alertas)"; AD="$P/.red/ops/$AOP"

@@ -43,13 +43,20 @@ Reglas de verdad:
 - Este encargo es una hipotesis: si el codigo lo contradice, manda el codigo y lo declaras.
 - Maximo 3 intentos por fallo, cada uno con una hipotesis distinta, corrigiendo la causa raiz.
 - Prohibido: push, merge, deploy, tocar produccion, borrar lo que esta operacion no creo,
-  nombres de personas en credenciales o commits, emojis, crear archivos .md no pedidos.
+  nombres de personas en credenciales o commits, emojis.
+- Archivos .md: validos solo los que exige el flujo (outputs/), los del protocolo de documentacion
+  (CLAUDE.md, TECHNICAL_DOCUMENTATION.md, CLAUDE.local.md) y los que Red justifico con `red-op doc`.
+  Cualquier otro .md es basura y es una falta.
+- Protocolo de documentacion: si el proyecto tiene CLAUDE.md, TECHNICAL_DOCUMENTATION.md o
+  CLAUDE.local.md, consultalos antes de cambiar nada y sigue CLAUDE.local.md. Declara en
+  `documentacion` que secciones consultaste y que documentacion hay que actualizar por tu cambio.
 
 Tu mensaje final es SOLO este JSON (sin texto alrededor):
 {"estado": "COMPLETADO|PARCIAL|FALLIDO|BLOQUEADO",
  "hecho": [{"accion": "...", "comando": "...", "exit": 0, "salida": "extracto literal"}],
  "tests": {"antes": "...", "despues": "...", "ejecutados": 0, "comando": "..."},
  "recursos_creados": [{"tipo": "archivo|proceso|puerto|worktree|rama|contenedor|volumen|imagen", "id": "..."}],
+ "documentacion": {"consultadas": ["CLAUDE.md seccion N", "..."], "actualizar": ["..."]},
  "no_hecho": ["..."], "supuestos": ["..."], "riesgos": ["..."], "contradicciones": []}
 Reportar un fallo con honestidad es exito. Ocultarlo es la unica falta grave.
 """

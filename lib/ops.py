@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import (EXIT_CORRUPT, OP_STATUSES, CorruptJSON, append_jsonl, data_dir,  # noqa: E402
                     fail, file_lock, is_terminal, ledger, live_sessions, now, op_dir, ops_root,
                     project_root, read_json_strict, run, write_json)
+import docs_audit  # noqa: E402
 
 STRIKE_TIERS = ("limpio", "rehacer", "probacion", "veto")
 ROLES = ("glen", "baz", "dembe", "kaplan", "zeng")
@@ -482,6 +483,7 @@ def build_parser():
     s.set_defaults(fn=cmd_worktree)
     s = sub.add_parser("show"); s.add_argument("op"); s.set_defaults(fn=cmd_show)
     s = sub.add_parser("list"); s.add_argument("--open", action="store_true"); s.set_defaults(fn=cmd_list)
+    docs_audit.register(sub)
     s = sub.add_parser("alerts"); s.add_argument("op"); s.add_argument("--wait", action="store_true")
     s.add_argument("--interval", type=float, default=5.0); s.set_defaults(fn=cmd_alerts)
     s = sub.add_parser("close"); s.add_argument("op"); s.add_argument("--summary", default="")

@@ -34,6 +34,8 @@ bash $R/red-cost.sh status                  gasto del mes de los tenientes contr
 bash $R/red-cost.sh report --by agent|model|op|project|day [--op <op>] [--since AAAA-MM-DD] [--format table|json|csv]
 bash $R/launch-operative.sh <rol> <op> <brief.json> [--cwd <dir>]   (SIEMPRE run_in_background)
 bash $R/red-op.sh alerts <op> --wait      (SIEMPRE run_in_background junto a cada teniente: te despierta si uno lleva demasiado sin actividad)
+bash $R/red-op.sh doc <op> --path <ruta.md> --why "<justificacion>"   un .md que no es del flujo ni del protocolo solo existe si lo justificas aqui
+bash $R/red-op.sh md-audit <op> --repo <ruta-repo> --base <sha>      .md nuevos; sale con 1 si alguno es basura (lo corre Dembe)
 bash $R/launch-operative.sh <rol> <op> <brief.json> --resume <session_id> --message "<exigencia>"   (retoma en el mismo directorio donde nacio la sesion)
 ```
 Codigos del lanzador:

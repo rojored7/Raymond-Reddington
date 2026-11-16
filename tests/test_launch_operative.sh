@@ -27,6 +27,10 @@ assert_contains "dembe sigue sin NotebookEdit" "$out" '"NotebookEdit"'
 assert_contains "inyecta el guard de escritura con --settings" "$out" '"--settings"'
 assert_contains "el guard inyectado es red-write-guard" "$out" 'red-write-guard.sh'
 assert_contains "el prompt declara la fase por defecto" "$out" 'Fase: verify'
+assert_not_contains "ya no prohibe todo .md" "$out" "archivos .md no pedidos"
+assert_contains "el contrato define que .md son validos" "$out" "red-op doc"
+assert_contains "el contrato pide consultar el protocolo de documentacion" "$out" "TECHNICAL_DOCUMENTATION.md"
+assert_contains "el reporte trae el campo documentacion" "$out" '"documentacion"'
 assert_contains "bloqueo comun: git push" "$out" 'Bash(git push:*)'
 assert_contains "bloqueo comun: --no-verify" "$out" 'no-verify'
 assert_contains "bloqueo comun: PowerShell" "$out" '"PowerShell"'
