@@ -2,8 +2,9 @@
 
 - Copia agentes a ~/.claude/agents (con backup de lo que existia) y scripts/hooks/lib a ~/.claude/red.
 - Siembra datos (reputacion, indice, destinos) solo si no existen: nunca pisa datos del usuario.
-- Registra los hooks en ~/.claude/settings.json (ambito de usuario) sumandolos a los existentes,
-  y pone agent=red. Un settings.json ilegible aborta la instalacion sin escribir nada.
+- Registra los hooks en ~/.claude/settings.json (ambito de usuario) sumandolos a los existentes.
+  NO pone agent=red: Red es opcional y se abre con scripts/red.sh (o red.cmd); si una version
+  anterior lo impuso, se restaura el agente previo. Un settings.json ilegible aborta sin escribir.
 - uninstall quita solo lo suyo, hook por hook, y restaura lo que habia.
 """
 import datetime
@@ -60,6 +61,14 @@ def strip_ours(settings):
     return settings
 
 
+def restore_agent(settings, prev):
+    """Devuelve settings con el agente que tenia el usuario antes de red-system."""
+    restored = {k: v for k, v in settings.items() if k != "agent"}
+    if prev and prev.get("present") and prev.get("value") != "red":
+        restored["agent"] = prev["value"]
+    return restored
+
+
 def copy_tree(src, dst):
     if os.path.isdir(dst):
         shutil.rmtree(dst)
@@ -104,7 +113,9 @@ def install():
     if manifest["settings_agent_prev"] is None:
         manifest["settings_agent_prev"] = {"present": "agent" in settings, "value": settings.get("agent")}
     settings = strip_ours(settings)
-    settings["agent"] = "red"
+    # Red es opcional (scripts/red.sh). Una version anterior imponia agent=red: se deshace.
+    if settings.get("agent") == "red":
+        settings = restore_agent(settings, manifest["settings_agent_prev"])
     for event, (matcher, script) in HOOKS.items():
         entry = {"hooks": [{"type": "command", "command": hook_command(red, script)}]}
         if matcher:
@@ -113,6 +124,8 @@ def install():
     write_json(settings_path, settings)
     write_json(manifest_path, manifest)
     print(f"red-system instalado en {red} (backup en {backup_dir})")
+    launcher = os.path.join(red, "scripts", "red.sh").replace(os.sep, "/")
+    print(f"Abre Red cuando lo necesites con: bash {launcher}  (o red.cmd en PowerShell/cmd)")
     return 0
 
 
@@ -156,8 +169,8 @@ def check():
         if not any(script in h.get("command", "") for e in settings.get("hooks", {}).get(event, [])
                    for h in e.get("hooks", [])):
             diffs.append(f"settings.json: falta hook {event} {script}")
-    if settings.get("agent") != "red":
-        diffs.append("settings.json: agent no es red")
+    if settings.get("agent") == "red":
+        diffs.append("settings.json: agent=red global (Red es opcional: abrelo con scripts/red.sh)")
     ok, lines = self_tests(red) if os.path.isdir(os.path.join(red, "hooks")) else (False, ["hooks no instalados"])
     for line in lines:
         print(line)
@@ -188,11 +201,7 @@ def uninstall():
         shutil.rmtree(os.path.join(red, d), ignore_errors=True)
     settings = strip_ours(settings)
     if settings.get("agent") == "red":
-        prev = manifest.get("settings_agent_prev") or {"present": False}
-        if prev.get("present"):
-            settings["agent"] = prev["value"]
-        else:
-            settings.pop("agent", None)
+        settings = restore_agent(settings, manifest.get("settings_agent_prev"))
     if not settings and not manifest.get("settings_existed"):
         if os.path.exists(settings_path):
             os.remove(settings_path)

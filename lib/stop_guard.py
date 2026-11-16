@@ -1,6 +1,7 @@
 """Hook Stop: impide que Red corte una operacion con trabajo pendiente.
 
-- Solo aplica a la sesion de Red (sin RED_ROLE o RED_ROLE=red); los tenientes nunca se bloquean.
+- Solo aplica a la sesion de Red (RED_ROLE=red, lo fija scripts/red.sh). Las sesiones normales de
+  Claude Code y los tenientes nunca se bloquean.
 - Deja terminar si una sesion de teniente sigue viva: su notificacion reanuda a Red.
 - Se aparta tras 3 intentos de parada sin progreso en tracker o estado.
 """
@@ -50,7 +51,7 @@ def should_step_aside(op_path):
 
 
 def decide(payload, role):
-    if role and role != "red":
+    if role != "red":
         return None
     cwd = project_root(payload.get("cwd") or os.getcwd())
     blocks = []
@@ -78,10 +79,11 @@ def self_test():
     op = os.path.join(tmp, ".red", "ops", "t")
     write_json(os.path.join(op, "state.json"), {"status": "executing"})
     write_json(os.path.join(op, "tracker.json"), {"tasks": [{"id": 1, "status": "pending"}]})
-    fires = bool(decide({"cwd": tmp}, None))
+    fires = bool(decide({"cwd": tmp}, "red"))
+    others_free = decide({"cwd": tmp}, None) is None and decide({"cwd": tmp}, "baz") is None
     write_json(os.path.join(op, "state.json"), {"status": "complete"})
-    quiet = decide({"cwd": tmp}, None) is None
-    ok = fires and quiet and decide({"cwd": tmp}, "baz") is None
+    quiet = decide({"cwd": tmp}, "red") is None
+    ok = fires and quiet and others_free
     print("self-test ok" if ok else f"self-test FALLO fires={fires} quiet={quiet}")
     return 0 if ok else 1
 

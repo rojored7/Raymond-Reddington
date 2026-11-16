@@ -25,7 +25,11 @@ ls "$C"/red/backups/*/settings.json >/dev/null 2>&1 && pass "respalda settings.j
 [ -f "$C/red/hooks/red-stop-guard.sh" ] && pass "instala hooks" || fail "instala hooks"
 [ -f "$C/red/lib/common.py" ] && pass "instala lib" || fail "instala lib"
 s="$(cat "$C/settings.json")"
-assert_eq "agent red en settings.json" "$(json_get "$C/settings.json" agent)" "red"
+assert_eq "no impone agent red global" "$(json_get "$C/settings.json" agent)" ""
+[ -f "$C/red/scripts/red.sh" ] && pass "instala el lanzador red.sh" || fail "instala el lanzador red.sh"
+[ -f "$C/red/scripts/red.cmd" ] && pass "instala el lanzador red.cmd" || fail "instala el lanzador red.cmd"
+assert_contains "red.sh fija RED_ROLE=red" "$(cat "$C/red/scripts/red.sh")" "RED_ROLE=red"
+assert_contains "red.sh abre el agente red" "$(cat "$C/red/scripts/red.sh")" "--agent red"
 assert_contains "conserva hooks previos" "$s" "echo existente"
 assert_contains "conserva hook previo de PreToolUse" "$s" "echo previo"
 assert_contains "conserva env" "$s" '"X": "1"'
@@ -48,6 +52,20 @@ assert_eq "reinstalar no pisa el presupuesto" "$(json_get "$C/red/budget.json" m
 assert_contains "reinstalar no pisa los destinos del usuario" "$(cat "$C/red/destinations.json")" "mio"
 n="$(grep -o 'red-stop-guard.sh' "$C/settings.json" | wc -l | tr -d ' ')"
 assert_eq "reinstalar no duplica hooks" "$n" "1"
+
+# Actualizacion desde la version que imponia agent=red: se restaura el agente previo del usuario
+"$PY" - "$C/settings.json" "$C/red/install-manifest.json" <<'PYEOF'
+import json, sys
+s, m = sys.argv[1], sys.argv[2]
+d = json.load(open(s)); d["agent"] = "red"; json.dump(d, open(s, "w"))
+d = json.load(open(m)); d["settings_agent_prev"] = {"present": True, "value": "mio"}; json.dump(d, open(m, "w"))
+PYEOF
+bash "$I" install >/dev/null 2>&1
+assert_eq "actualizar restaura el agente previo del usuario" "$(json_get "$C/settings.json" agent)" "mio"
+"$PY" -c "import json,sys;p=sys.argv[1];d=json.load(open(p));d['agent']='red';json.dump(d,open(p,'w'))" "$C/settings.json"
+out="$(bash "$I" --check 2>&1)"
+assert_contains "check avisa si agent=red quedo global" "$out" "agent=red global"
+"$PY" -c "import json,sys;p=sys.argv[1];d=json.load(open(p));d.pop('agent');json.dump(d,open(p,'w'))" "$C/settings.json"
 
 out="$(bash "$I" --check 2>&1)"; assert_eq "check sin diferencias termina en 0" "$?" "0"
 assert_contains "check corre los self-test de los hooks" "$out" "self-test"

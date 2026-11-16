@@ -55,7 +55,7 @@ bash "$GUARD" --self-test >/dev/null 2>&1 && pass "self-test del guard" || fail 
 
 # --- red-stop-guard ---
 P="$T/proj"; OP="$P/.red/ops/op1"; mkdir -p "$OP"
-stop() { printf '{"session_id":"s1","cwd":"%s","stop_hook_active":false}' "$P" | env -u RED_ROLE bash "$STOP"; }
+stop() { printf '{"session_id":"s1","cwd":"%s","stop_hook_active":false}' "$P" | RED_ROLE=red bash "$STOP"; }
 write_state() { printf '{"op":"op1","status":"%s"}' "$1" > "$OP/state.json"; }
 write_tracker() { printf '{"tasks":[{"id":1,"status":"%s"}]}' "$1" > "$OP/tracker.json"; }
 
@@ -83,13 +83,15 @@ stop >/dev/null; stop >/dev/null; stop >/dev/null
 assert_eq "se aparta tras 3 intentos sin progreso" "$(stop)" ""
 rm -f "$OP/stop-guard.json"
 mkdir -p "$P/sub/dir"
-assert_contains "ve la operacion desde un subdirectorio" "$(printf '{"cwd":"%s"}' "$P/sub/dir" | env -u RED_ROLE bash "$STOP")" '"block"'
+assert_contains "ve la operacion desde un subdirectorio" "$(printf '{"cwd":"%s"}' "$P/sub/dir" | RED_ROLE=red bash "$STOP")" '"block"'
 rm -f "$OP/stop-guard.json"
 echo '{"tasks": [ roto' > "$OP/tracker.json"
 assert_contains "tracker ilegible bloquea y lo dice" "$(stop)" "ilegible"
 rm -f "$OP/stop-guard.json"; write_tracker "pending"
 out="$(printf '{"cwd":"%s"}' "$P" | RED_ROLE=dembe bash "$STOP")"
 assert_eq "no aplica a sesiones de tenientes" "$out" ""
+out="$(printf '{"cwd":"%s"}' "$P" | env -u RED_ROLE bash "$STOP")"
+assert_eq "no aplica a sesiones normales (sin RED_ROLE)" "$out" ""
 bash "$STOP" --self-test >/dev/null 2>&1 && pass "self-test del stop guard" || fail "self-test del stop guard"
 
 git -C "$REPO" worktree remove --force "$WT" 2>/dev/null
