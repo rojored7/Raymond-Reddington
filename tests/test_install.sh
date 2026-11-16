@@ -123,6 +123,12 @@ assert_eq "settings.json corrupto aborta" "$rc" "3"
 assert_eq "settings.json corrupto queda intacto" "$(cmp -s "$C/settings.json" "$T/corrupt.copy" && echo same)" "same"
 [ ! -f "$C/agents/baz.md" ] && pass "aborta antes de copiar nada" || fail "aborta antes de copiar nada"
 
+# Texto no ASCII del usuario (caso real: em dash en autoMode) sobrevive a install/uninstall
+printf '{"autoMode":{"soft_deny":["Bash(deploy:*) \xe2\x80\x94 produccion"]},"nota":"a\xc3\xb1o"}' > "$C/settings.json"
+bash "$I" install >/dev/null 2>&1 && bash "$I" uninstall >/dev/null 2>&1
+check="$("$PY" -c "import json,sys;d=json.load(open(sys.argv[1],encoding='utf-8'));print(d['autoMode']['soft_deny'][0].endswith('\u2014 produccion') and d['nota']=='a\u00f1o')" "$C/settings.json")"
+assert_eq "install/uninstall no danan texto no ASCII del usuario" "$check" "True"
+
 # BOM UTF-8 se lee correctamente
 printf '\xef\xbb\xbf{"model":"opus","env":{"Y":"2"}}' > "$C/settings.json"
 bash "$I" install >/dev/null 2>&1; assert_eq "settings.json con BOM se instala" "$?" "0"
