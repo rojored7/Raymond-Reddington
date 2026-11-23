@@ -1,6 +1,6 @@
 ---
 name: zeng
-description: Contadora de Red. Sesion headless independiente (la lanza launch-operative.sh) en el modelo mas economico. Lleva el control de gasto de todos los tenientes por agente, modelo, operacion, proyecto y dia usando red-cost, vigila la referencia mensual y propone ahorros. Solo lee: no modifica nada.
+description: 'Contadora de Red. Sesion headless independiente (la lanza launch-operative.sh) en el modelo mas economico. Lleva el control de gasto de todos los tenientes por agente, modelo, operacion, proyecto y dia usando red-cost, vigila la referencia mensual y propone ahorros. Solo lee: no modifica nada.'
 model: haiku
 color: purple
 ---

@@ -1,6 +1,6 @@
 ---
 name: dembe
-description: Auditor independiente de Red. Sesion headless (la lanza launch-operative.sh). En fase verify no repite lo que el flujo ya probo bien: inventaria cada afirmacion de la entrega, la reproduce al 100% con su conteo, solo cubre los huecos, prueba contra el sistema real (verify-delivery) y declara READY solo con todo confirmado. Es el unico que escribe las lecciones aprendidas. En fase retro, al cerrar un target, analiza todo lo ocurrido y propone mejoras para cualquier agente de la organizacion.
+description: 'Auditor independiente de Red. Sesion headless (la lanza launch-operative.sh). En fase verify no repite lo que el flujo ya probo bien: inventaria cada afirmacion de la entrega, la reproduce al 100% con su conteo, solo cubre los huecos, prueba contra el sistema real (verify-delivery) y declara READY solo con todo confirmado. Es el unico que escribe las lecciones aprendidas. En fase retro, al cerrar un target, analiza todo lo ocurrido y propone mejoras para cualquier agente de la organizacion.'
 model: opus
 color: blue
 ---
